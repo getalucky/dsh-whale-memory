@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { ensureDirs, addItem, loadScope, saveScope, emptyScope, readJsonl, paths, similarity } from '../lib/store.js'
 import { enrichItem, summarize, weightOf } from '../lib/enrich.js'
 import { extractConcepts } from '../lib/taxonomy.js'
-import { skipReason, hasSignal } from '../lib/distill.js'
+import { skipReason, hasSignal, extractCandidates } from '../lib/distill.js'
 import { createHarness } from './eval/harness.mjs'
 import { planDeepen, applyDeepen } from '../lib/deepen.js'
 
@@ -145,6 +145,37 @@ try {
     const loaded = await loadScope(root, 'private', '12')
     assert.ok(loaded.items[0].tags.includes('高数'), JSON.stringify(loaded.items[0].tags))
     ok('副库写盘：标签与上级标签可回读')
+  }
+
+  // 10. 蒸馏质量：碎句和问句不进库
+  {
+    assert.equal(skipReason('我叫你肉肉好吗'), 'question')
+    assert.ok(
+      !extractCandidates('我叫你肉肉好吗').some((c) => c.text.startsWith('名字叫')),
+      '「我叫你…」被当成自我介绍',
+    )
+    assert.deepEqual(extractCandidates('留个回头的余地'), [])
+    assert.deepEqual(extractCandidates('回头看一眼的'), [])
+    assert.ok(
+      extractCandidates('明天也是8:30上班').some((c) => c.text === '明天也是8:30上班'),
+      '正常计划不该被误杀',
+    )
+    assert.ok(
+      extractCandidates('下周一我把索引重建完').some((c) => c.kind === 'event'),
+      '正常计划不该被误杀',
+    )
+    ok('蒸馏质量：问句不记、残句不入库、正常计划照收')
+  }
+
+  // 11. 同一事实的省略说法要合并，别让低置信条目顶掉高置信条目
+  {
+    const sc = emptyScope('private', '13')
+    const tool = addItem(sc, { text: '老爹11月1日（明天）也是8:30上班', kind: 'fact', conf: 0.8, source: 'tool' })
+    const again = addItem(sc, { text: '明天也是8:30上班', kind: 'event', conf: 0.55, source: 'session:x' })
+    assert.equal(sc.items.length, 1)
+    assert.equal(again.id, tool.id)
+    assert.equal(tool.state, 'active')
+    ok('同事实合并：省略主语/日期也算同一条，模型写的没被顶掉')
   }
 
   console.log(`\n${pass} 通过 · 0 失败`)
