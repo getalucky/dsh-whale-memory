@@ -63,6 +63,20 @@ t('我是Y', () => {
   eq([r[0].s, r[0].rel, r[0].o], ['大肥鱼', '是', '鲸鱼'])
 })
 
+t('时间状语不当主语（明天也是8:30上班）', () => {
+  eq(extractTriples('明天也是8:30上班', { self: '老爹' }), [])
+  eq(extractTriples('明天也是8:30上班'), [])
+})
+
+t('副词开头不当主语', () => {
+  eq(extractTriples('也就是个玩笑'), [])
+})
+
+t('谓语不当宾语（我是来打工的）', () => {
+  const r = extractTriples('我是来打工的')
+  ok(!r.some((x) => x.rel === '是'), JSON.stringify(r))
+})
+
 t('问句不瞎抽', () => {
   eq(extractTriples('你明天上班吗'), [])
 })
