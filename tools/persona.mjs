@@ -1,0 +1,60 @@
+/**
+ * persona.mjs —— 人格蒸馏闸门的命令行入口
+ *
+ *   node tools/persona.mjs status
+ *   node tools/persona.mjs propose [--out 文件]
+ *   node tools/persona.mjs apply [提案文件] --approve
+ *   node tools/persona.mjs rollback [版本号]
+ *
+ * 没有 --approve 不会写任何东西：提案必须先给人看，确认后才生效。
+ */
+import { join } from 'node:path'
+
+import { rootDir, ensureDirs } from '../lib/store.js'
+import { status, propose, applyProposal, rollback, PERSONA } from '../lib/persona.js'
+
+const root = process.env.DSH_MEMORY_HOME || rootDir()
+const [cmd = 'status', ...args] = process.argv.slice(2)
+await ensureDirs(root)
+
+const flag = (name) => args.includes(name)
+const positional = args.filter((x) => !x.startsWith('--'))
+
+try {
+  if (cmd === 'status') {
+    const s = await status(root)
+    console.log(`人格 · v${s.version} · ${s.tokens}/${s.limit} tokens${s.overBudget ? '（超预算）' : ''}`)
+    console.log(`区块：CORE ${s.hasCore ? '有' : '缺'} · EVOLVABLE ${s.hasEvolvable ? '有' : '缺'}`)
+    console.log(`归档：${s.archive.length ? s.archive.join(', ') : '（空）'}`)
+  } else if (cmd === 'propose') {
+    const p = await propose(root)
+    const outIdx = args.indexOf('--out')
+    const out = outIdx >= 0 ? args[outIdx + 1] : join(root, PERSONA.proposal)
+    console.log(`候选 ${p.additions.length} 条，证据 ${p.sources} 条记忆，预算 ${p.budget.tokens}/${p.budget.limit}`)
+    for (const a of p.additions) {
+      console.log(`\n+ ${a.rule}`)
+      for (const e of a.evidence.slice(0, 3)) console.log(`    依据 ${e.id}：${e.text}`)
+    }
+    for (const w of p.warnings) console.log(`! ${w}`)
+    console.log(`\n提案：${out}\n确认无误后：node tools/persona.mjs apply ${out} --approve`)
+  } else if (cmd === 'apply') {
+    const file = positional[0] ? positional[0] : join(root, PERSONA.proposal)
+    if (!flag('--approve')) {
+      console.log('没有 --approve，不写盘。先跑 propose 看提案，确认后再加 --approve。')
+      process.exitCode = 1
+    } else {
+      const r = await applyProposal(root, file)
+      console.log(`已应用 ${r.applied} 条 → v${r.version} · ${r.tokens} tokens`)
+      console.log('新人格从下一个会话生效（当前会话用快照）。')
+    }
+  } else if (cmd === 'rollback') {
+    const r = await rollback(root, positional[0])
+    console.log(`已回滚到 v${r.version} · ${r.tokens} tokens`)
+  } else {
+    console.log('用法：status | propose | apply <文件> --approve | rollback [版本]')
+    process.exitCode = 1
+  }
+} catch (e) {
+  console.error(`失败：${String(e?.message ?? e)}`)
+  process.exitCode = 1
+}
