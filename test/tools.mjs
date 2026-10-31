@@ -79,6 +79,23 @@ try {
   assert.ok(usage.includes('read_memory'), usage.slice(0, 200))
   ok('读取事件写 usage.jsonl')
 
+  // 读账：search / read / profile 统一落 audit/reads.jsonl，失败分支也要记
+  await tools.get('profile_show').execute({ scope: sc.scope })
+  const readsFile = join(h.root, 'audit', 'reads.jsonl')
+  const rows = (await readFile(readsFile, 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  const kinds = rows.map((x) => x.kind)
+  assert.ok(kinds.includes('search') && kinds.includes('read') && kinds.includes('profile'),
+    '读账缺项：' + kinds.join(','))
+  const sr = rows.find((x) => x.kind === 'search')
+  assert.equal(sr.tool, 'search_memory')
+  assert.equal(typeof sr.ms, 'number')
+  assert.equal(typeof sr.empty, 'boolean')
+  const rr = rows.find((x) => x.kind === 'read' && x.ok)
+  assert.ok(rr.id === hit.id && rr.tokens > 0, JSON.stringify(rr))
+  assert.ok(rows.some((x) => x.kind === 'read' && x.ok === false && /3 条/.test(x.why)),
+    '被配额挡掉的那次也要留痕')
+  ok('读账：search/read/profile 都落 reads.jsonl，失败分支也有')
+
   // memory_save：缺 source_quote 拒写
   const bad = await tools.get('memory_save').execute({ text: '用户喜欢深色主题' })
   assert.equal(bad.ok, false)
