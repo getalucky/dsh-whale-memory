@@ -5,8 +5,12 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-const root = process.env.DSH_MEMORY_HOME || '$DSH_HOME/dsh-memory'
-const dshHome = process.env.DSH_HOME || '$DSH_HOME'
+const dshHome = process.env.DSH_HOME || ''
+const root = process.env.DSH_MEMORY_HOME || (dshHome ? join(dshHome, 'dsh-memory') : '')
+if (!root) {
+  console.error('缺少 DSH_MEMORY_HOME 或 DSH_HOME 环境变量')
+  process.exit(2)
+}
 
 const say = (s = '') => console.log(s)
 const line = () => say('─'.repeat(48))

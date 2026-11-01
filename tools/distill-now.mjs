@@ -2,7 +2,11 @@
  * distill-now.mjs —— 立刻蒸馏所有 staging（不等 10 分钟空闲）
  * 跑法：node tools/distill-now.mjs
  */
-const root = process.env.DSH_MEMORY_HOME || '$DSH_HOME/dsh-memory'
+const root = process.env.DSH_MEMORY_HOME
+if (!root) {
+  console.error('需要 DSH_MEMORY_HOME 环境变量')
+  process.exit(2)
+}
 process.env.DSH_MEMORY_HOME = root
 
 const { listStaging } = await import('../lib/ingest.js')

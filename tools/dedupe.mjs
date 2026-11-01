@@ -5,7 +5,11 @@
  * 规则：bigram 相似度 ≥ 0.72 的合并到最早那条，
  * 保留更长的说法，命中数相加，置信度取高。
  */
-const root = process.env.DSH_MEMORY_HOME || '$DSH_HOME/dsh-memory'
+const root = process.env.DSH_MEMORY_HOME
+if (!root) {
+  console.error('需要 DSH_MEMORY_HOME 环境变量')
+  process.exit(2)
+}
 process.env.DSH_MEMORY_HOME = root
 
 const { listScopes, saveScope, findSimilarItem, auditWrite } = await import('../lib/store.js')

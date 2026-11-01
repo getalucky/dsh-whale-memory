@@ -44,18 +44,22 @@ for (const t of tools) {
   assert.equal(typeof t.output?.render, 'function', `${t.name} 缺 output.render`)
 }
 
-// 模拟一次 agent 创建（桥接会话）——用真实绑定里的 sessionId
+// 模拟一次 agent 创建（桥接会话）——有真实绑定就用真实 sessionId
 import { readFileSync, readdirSync } from 'node:fs'
+const neutralCwd = join(tmpdir(), 'whale-apply-cwd')
 let realSid = 'session-fake-bridge'
+const cfgPath = process.env.DSH_QQ_BRIDGE_CONFIG
+  || (process.env.DSH_HOME ? join(process.env.DSH_HOME, 'qq-bridge-config.json') : '')
 try {
-  const cfg = JSON.parse(readFileSync('$DSH_HOME/qq-bridge-config.json', 'utf8'))
+  if (!cfgPath) throw new Error('no config')
+  const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'))
   const first = (cfg.绑定 || [])[0]
   if (first?.会话) realSid = String(first.会话)
 } catch { /* 用假 id，下面会跳过 */ }
 
 handlers['agent/created']?.[0]?.({
   agent: {
-    session: { header: { id: realSid, cwd: '$DSH_HOME/dsh-fish/home' } },
+    session: { header: { id: realSid, cwd: neutralCwd } },
     ctx: { systemPrompt: { section(s) { sections.push(s) } } },
   },
 })
@@ -66,7 +70,7 @@ console.log('sections:', sections.map((s) => `${s.name}@${s.order}`).join(', '))
 const before = sections.length
 handlers['agent/created']?.[0]?.({
   agent: {
-    session: { header: { id: 'session-not-bound-xyz', cwd: '$WORKSPACE' } },
+    session: { header: { id: 'session-not-bound-xyz', cwd: neutralCwd } },
     ctx: { systemPrompt: { section(s) { sections.push(s) } } },
   },
 })
