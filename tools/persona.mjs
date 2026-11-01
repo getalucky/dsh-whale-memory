@@ -2,16 +2,18 @@
  * persona.mjs —— 人格蒸馏闸门的命令行入口
  *
  *   node tools/persona.mjs status
+ *   node tools/persona.mjs probe
  *   node tools/persona.mjs propose [--out 文件]
  *   node tools/persona.mjs apply [提案文件] --approve
  *   node tools/persona.mjs rollback [版本号]
  *
  * 没有 --approve 不会写任何东西：提案必须先给人看，确认后才生效。
+ * probe 是静态体检（20 项），apply 前后各跑一次，通过项数掉了就拒绝。
  */
 import { join } from 'node:path'
 
 import { rootDir, ensureDirs } from '../lib/store.js'
-import { status, propose, applyProposal, rollback, PERSONA } from '../lib/persona.js'
+import { status, propose, applyProposal, rollback, probePersona, PERSONA } from '../lib/persona.js'
 
 const root = process.env.DSH_MEMORY_HOME || rootDir()
 const [cmd = 'status', ...args] = process.argv.slice(2)
@@ -25,7 +27,13 @@ try {
     const s = await status(root)
     console.log(`人格 · v${s.version} · ${s.tokens}/${s.limit} tokens${s.overBudget ? '（超预算）' : ''}`)
     console.log(`区块：CORE ${s.hasCore ? '有' : '缺'} · EVOLVABLE ${s.hasEvolvable ? '有' : '缺'}`)
+    console.log(`探针：${s.probes.passed}/${s.probes.total}${s.probes.failed.length ? `（${s.probes.failed.map((f) => f.name).join('、')}）` : ''}`)
     console.log(`归档：${s.archive.length ? s.archive.join(', ') : '（空）'}`)
+  } else if (cmd === 'probe') {
+    const r = await probePersona(root)
+    console.log(`探针 ${r.passed}/${r.total}`)
+    for (const f of r.failed) console.log(`  ✗ ${f.name} — ${f.detail}`)
+    if (r.failed.length) process.exitCode = 1
   } else if (cmd === 'propose') {
     const p = await propose(root)
     const outIdx = args.indexOf('--out')
@@ -44,7 +52,7 @@ try {
       process.exitCode = 1
     } else {
       const r = await applyProposal(root, file)
-      console.log(`已应用 ${r.applied} 条 → v${r.version} · ${r.tokens} tokens`)
+      console.log(`已应用 ${r.applied} 条 → v${r.version} · ${r.tokens} tokens · 探针 ${r.probes.passed}/${r.probes.total}`)
       console.log('新人格从下一个会话生效（当前会话用快照）。')
     }
   } else if (cmd === 'rollback') {
