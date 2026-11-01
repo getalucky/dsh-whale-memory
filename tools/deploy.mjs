@@ -1,7 +1,7 @@
 /**
  * deploy.mjs —— 把工作区的鲸鱼记忆打包进 desktop profile
  *
- * 为什么要打包：以前 profile 用 `link:` 直接读 $WORKSPACE\dsh-whale-memory。
+ * 为什么要打包：以前 profile 用 `link:` 直接读仓库目录。
  * 工作区里的 lib/client.js 一旦被挪走、改名或写到一半，DSH 下一次启动就会
  * 因为 client bundle 缺失整个起不来（2026-10-30 连崩三次就是这个）。
  * 现在改成 tarball：profile 里是解压后的真实副本，工作区怎么改都影响不到启动。
@@ -28,7 +28,11 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const 根 = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const DSH家 = process.env.DSH_HOME || '$DSH_HOME'
+const DSH家 = process.env.DSH_HOME
+if (!DSH家) {
+  console.error('需要 DSH_HOME 环境变量（指向 DSH 安装目录）')
+  process.exit(2)
+}
 const profile = join(DSH家, 'profiles', 'desktop')
 const vendor = join(profile, 'vendor')
 const 装机 = join(profile, 'node_modules', 'dsh-whale-memory')
@@ -88,7 +92,13 @@ if (existsSync(锁路径)) copyFileSync(锁路径, 锁路径 + '.bak-before-depl
 
 console.log('\n[2/4] 改 profile 依赖');
 const 配置 = JSON.parse(readFileSync(配置路径, 'utf8'))
+配置.dependencies ??= {}
 配置.dependencies['dsh-whale-memory'] = 'file:vendor/' + 包名
+// 只写 dependencies 不会自动加载，profile 的 bundles 里必须有这个包名
+配置.dsh ??= {}
+配置.dsh.profile ??= {}
+配置.dsh.profile.bundles ??= []
+if (!配置.dsh.profile.bundles.includes('dsh-whale-memory')) 配置.dsh.profile.bundles.push('dsh-whale-memory')
 writeFileSync(配置路径, JSON.stringify(配置, null, 2) + '\n', 'utf8')
 
 console.log('\n[3/4] 安装');

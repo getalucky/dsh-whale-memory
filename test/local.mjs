@@ -54,12 +54,12 @@ try {
   for (const fn of handlers.get('session/event') || []) {
     // 宿主运行环境快照（source.kind=runtime-context）：不是人说的话，必须丢
     fn(
-      { header: { id: sid, cwd: '$WORKSPACE/demo' } },
-      { type: 'user/message', data: { content: [{ type: 'text', text: 'Current working directory: "$WORKSPACE\\demo".' }], source: { kind: 'runtime-context' } } },
+      { header: { id: sid, cwd: 'C:/work/demo' } },
+      { type: 'user/message', data: { content: [{ type: 'text', text: 'Current working directory: "C:\\work\\demo".' }], source: { kind: 'runtime-context' } } },
     )
     fn(
-      { header: { id: sid, cwd: '$WORKSPACE/demo' } },
-      { type: 'user/message', data: { content: [{ type: 'text', text: '以后都用 pnpm；路径是 $WORKSPACE\\demo' }], source: { kind: 'user' } } },
+      { header: { id: sid, cwd: 'C:/work/demo' } },
+      { type: 'user/message', data: { content: [{ type: 'text', text: '以后都用 pnpm；路径是 C:\\work\\demo' }], source: { kind: 'user' } } },
     )
   }
   await flush()
@@ -69,10 +69,10 @@ try {
   ok('本地会话消息进 staging（运行环境快照被丢掉）')
 
   // 3. 工程语境抽取：路径/约定能抽，纯闲聊抽不出
-  const work = extractCandidates('以后都用 pnpm；路径是 $WORKSPACE\\demo', { work: true })
+  const work = extractCandidates('以后都用 pnpm；路径是 C:\\work\\demo', { work: true })
   assert.ok(work.some((c) => c.text.includes('pnpm')), JSON.stringify(work))
-  assert.ok(work.some((c) => c.text.includes('$WORKSPACE\\demo')), JSON.stringify(work))
-  assert.equal(extractCandidates('路径是 $WORKSPACE\\demo', { work: false }).length, 0, 'QQ 规则不该抽工程路径')
+  assert.ok(work.some((c) => c.text.includes('C:\\work\\demo')), JSON.stringify(work))
+  assert.equal(extractCandidates('路径是 C:\\work\\demo', { work: false }).length, 0, 'QQ 规则不该抽工程路径')
   ok('工程语境抽取只对本地生效')
 
   // 4. 蒸馏：落到 local:dsh，条目带路径和 pnpm
@@ -82,7 +82,7 @@ try {
   const sc = await loadScope(root, 'local', 'dsh')
   const texts = sc.items.map((x) => x.text).join(' | ')
   assert.ok(texts.includes('pnpm'), texts)
-  assert.ok(texts.includes('$WORKSPACE\\demo'), texts)
+  assert.ok(texts.includes('C:\\work\\demo'), texts)
   assert.equal((await readStagingLines(root, sid)).length, 0, '蒸馏后 staging 该清空')
   const all = await listScopes(root)
   assert.ok(all.some((x) => x.scope === 'local:dsh'), 'listScopes 没列到本地分片')
@@ -97,7 +97,7 @@ try {
   }
   registerInjection(ictx, { root, log: () => {} })
   for (const fn of handlers.get('agent/created') || []) {
-    fn({ agent: { session: { header: { id: sid, cwd: '$WORKSPACE/demo' } }, ctx: { systemPrompt: { section(s) { sections.push(s) } } } } })
+    fn({ agent: { session: { header: { id: sid, cwd: 'C:/work/demo' } }, ctx: { systemPrompt: { section(s) { sections.push(s) } } } } })
   }
   await new Promise((r) => setTimeout(r, 120))
   const mem = sections.find((s) => s.name === MEMORY_SECTION)

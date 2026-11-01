@@ -2,6 +2,41 @@
 
 大肥鱼的记忆库。固定人格 + 分层记忆 + 用户/群分片 + 蒸馏 + 淡忘归档。
 
+这是 DeepSeek Harness（DSH）的插件：装上以后，会话创建时自动挂一份人格到 system prompt，聊天内容按私聊 / 群 / 本机分片落盘，空闲时蒸馏成条目，长会话按需读取而不是把整个库塞进上下文。零外部依赖，只用 Node 内置模块。
+
+## 安装
+
+**前置**
+- DSH 桌面版，profile 目录是 `$DSH_HOME/profiles/desktop`（`DSH_HOME` 一般指 `~/.dsh` 或你自定义的安装目录）
+- Node ≥ 20，profile 里带 pnpm（DSH 自带在 `$DSH_HOME/dsh-runtimes/`）
+- **安装时 DSH 必须关闭**：装的过程会重写 `profile/node_modules`
+
+**方式一：脚本（在本仓库里）**
+
+```bash
+npm pack                                   # 产出 dsh-whale-memory-<版本>.tgz
+# 关掉 DSH，然后
+export DSH_HOME=/path/to/dsh               # Windows: set DSH_HOME=D:\dsh
+node tools/deploy.mjs
+```
+
+脚本会打包 → 放进 `profile/vendor/` → 改 `profile/package.json` 的 `dependencies` 和 `dsh.profile.bundles` → `pnpm install` → 核对装机的 `lib/client.js` 和工作区一致。任何一步失败都会还原配置，不会留下半装状态。
+
+**方式二：手工**
+
+1. `npm pack`，把 tgz 放进 `$DSH_HOME/profiles/desktop/vendor/`
+2. `profile/package.json` 里加两处：
+   ```json
+   {
+     "dependencies": { "dsh-whale-memory": "file:vendor/dsh-whale-memory-<版本>.tgz" },
+     "dsh": { "profile": { "bundles": ["...原有项", "dsh-whale-memory"] } }
+   }
+   ```
+3. 在 profile 目录跑 `pnpm install`
+4. 启动 DSH，设置里应该出现「大肥鱼记忆」页签
+
+**装完先改人格**：仓库里的 `persona.md` 只是新装时的种子，`$DSH_HOME/dsh-memory/persona.md` 才是运行时那份（库里有就不覆盖）。把里面「拥有者是 QQ 123456789」换成你自己的号，否则它认不出谁是主人。不想要鲸鱼人设，整份换成你自己写的也行——`<!-- PERSONA:CORE:START -->` 和 `<!-- PERSONA:EVOLVABLE:START -->` 两个区块要留着，探针和自动迭代都靠它们定位。
+
 ## 它做什么
 
 - **固定人格**：`persona.md` 挂进所有会话的 system prompt（默认全局，含人格与纪律）；注入前去掉区块标记，预算 ≤1200 tok。
@@ -146,9 +181,15 @@ window.__ModuleLoader__.load({ id: '<包名>', factory: (require) => { ... } })
 - 里面只能 `require('react')`，**不能有顶层 import/export**，否则宿主 `ClientModuleRegistry.flush` 直接抛错，整个 DSH 起不来
 - `package.json` 必须同时有 `dsh.client`（platform: web）和 `exports["./client"]`
 - 改完先跑 `node tools/verify-client.mjs`（复刻宿主校验规则），过了再重启
-- 崩了打不开：双击 `$WORKSPACE\回退-去掉界面.cmd`，只摘掉界面、保留记忆本体
+- 崩了打不开：把 `package.json` 的 `exports["./client"]` 和 `dsh.client` 摘掉，只留记忆本体，宿主就不会因为客户端 bundle 报错而整个起不来
 
 ## 测试
+
+```
+npm test                # 29 组全跑，零外部依赖，不联网
+```
+
+单跑某一组：
 
 ```
 node test/smoke.mjs     # 存储/蒸馏/遗忘
@@ -176,7 +217,7 @@ node tools/check.mjs           # 跑起来之后看真实数据
 ## 目录
 
 ```
-$DSH_HOME/dsh-memory/        （默认 $DSH_HOME\dsh-memory）
+$DSH_HOME/dsh-memory/        （可用 DSH_MEMORY_HOME 改到别处）
 ├─ persona.md                人格（库里有就不覆盖插件自带那份，改插件不会生效）
 ├─ scopes/                   分片记忆
 ├─ staging/                  待蒸馏的原始消息

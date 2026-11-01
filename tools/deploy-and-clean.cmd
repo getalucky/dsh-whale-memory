@@ -7,13 +7,13 @@ node tools\cleanup-fragments.mjs
 if errorlevel 1 goto fail
 
 echo.
-echo [2/2] 打包并部署 0.4.1
+echo [2/2] 打包并部署当前版本
 node tools\deploy.mjs
 if errorlevel 1 goto fail
 
 echo.
 echo 全部完成。现在可以打开 DSH。
-echo 打开后看总览页：版本应该是 0.4.1。
+echo 打开后看总览页：版本号跟 package.json 里一致就对。
 goto end
 
 :fail
