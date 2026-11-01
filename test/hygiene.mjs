@@ -40,7 +40,7 @@ try {
   assert.equal(isMetaMessage('Elapsed since the preceding model-visible message: 1m 46s.'), true)
   assert.equal(isMetaMessage('<system-reminder>xxx</system-reminder>'), true)
   assert.equal(isMetaMessage('Current runtime context. This snapshot supersedes earlier runtime-context snapshots.'), true)
-  assert.equal(isMetaMessage('Current working directory: "$DSH_HOME\\dsh-fish\\home".'), true)
+  assert.equal(isMetaMessage('Current working directory: "D:\\dsh\\sessions\\home".'), true)
   assert.equal(isMetaMessage('Current DSH file policy: workspace-write.'), true)
   assert.equal(isMetaMessage('Approval policy: ask.'), true)
   assert.equal(isMetaMessage('Current DeepSeek Harness implementation checkout: "D:\\DeepSeek_Harness\\resources\\app.asar\\dsh\\".'), true)

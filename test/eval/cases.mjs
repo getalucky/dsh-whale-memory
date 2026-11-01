@@ -64,8 +64,8 @@ export const CASES = [
     id: 'w04',
     group: '写入',
     note: '环境事实（没有"记住"触发词，规则版预期漏记）',
-    turns: ['我的 DSH 装在 D 盘，数据目录是 $DSH_HOME'],
-    remember: ['$DSH_HOME'],
+    turns: ['我的 DSH 装在 D 盘，数据目录是 D:\\dsh'],
+    remember: ['D:\\dsh'],
     needs: 'model',
   },
   {
