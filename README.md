@@ -33,7 +33,11 @@
 - **读侧工具**：`search_memory`（查副库，只返回 id/摘要/标签/权重）/ `read_memory`（按 section 读主库，单次 ≤800 tok）
   / `profile_show`；旧的 `memory_recall` 作为别名保留
 - **写侧工具**：`memory_save`（必须带 `source_quote` 用户原话）/ `memory_pending`（看待确认）/ `memory_confirm`（点头转正）
-  / `memory_correct` / `memory_forget` / `memory_revive`（从归档或过期里找回）
+  / `memory_correct` / `memory_update`（只改话题进展、承诺到期，不新建）/ `memory_forget` / `memory_revive`（从归档或过期里找回）
+- **三类特殊记忆**：`lesson` 教训（必填 `trigger`「当……时」+ `anti_pattern`，写不出来就不是教训）、
+  `topic` 进行中话题（必填 `goal`，进展变化用 `memory_update` 改，不新建条目）、
+  `commitment` 承诺（必填 `due` / `to_whom`，日期或「下次提到 X 时」）。
+  会话首轮的骨架里会提醒「逾期/一周内到期的承诺 + 进行中话题 + 最重的一条教训」，零 LLM、纯日期比较，不逐轮扫
 - **确认闸门**：`memory_save` 只认用户原话里的「记住 / 纠正 / 长期偏好」信号，有信号才直接生效；
   没有就落 `suggested`（待确认）——不进副库、不进骨架、不参与检索，等用户点头再 `memory_confirm`。
   待确认条目不占容量位，也不会取代已生效的旧说法；蒸馏链路（规则/LLM 抽取）仍按原来的过滤直接入库
