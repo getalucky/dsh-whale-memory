@@ -6,6 +6,9 @@
 
 - **固定人格**：`persona.md` 挂进所有会话的 system prompt（默认全局，含人格与纪律）；注入前去掉区块标记，预算 ≤1200 tok。
   完整来历与旧稿在 `persona_full.md`（只做参考，不注入）。人格沉淀走 `node tools/persona.mjs propose/apply/rollback`，只改 EVOLVABLE 区块，人工确认后版本化落盘。
+  蒸馏生成与审查分开：生成只看脱敏样本（命令 / 日志 / 凭据不进，按分片均衡），审查先跑确定性检查
+  （证据 id 必须在库、不写事件 / 日期 / 号码 / 路径 / 凭据、不重复、不超预算），再可选调独立审查模型；
+  没配 LLM 就退回规则候选，失败不写半截提案。
 - **人格探针**：20 项静态体检（区块 / 预算 / 不自曝 / 不写事件与日期 / 不写路径与凭据 / 称呼与语气规则在不在）。
   `propose` 时给人看，`apply` 前后各跑一次，通过项数掉了就拒绝应用；变更写进 `persona_changelog.md`（版本、新增规则、依据的记忆 id）。
 - **经验与画像**：`AGENT.md`（原则 / 路径 / 坑，≤3000 字符）和 `USER.md`（偏好 / 习惯 / 红线 / 背景，≤3000 字符）
@@ -33,7 +36,9 @@
 - **群成员**：只记昵称和活跃度，注入成「【群里的人】」，不落 QQ 号
 - **淡忘**：`conf × exp(-age/30d) × 命中加成`，低于 0.5 降 warm、低于 0.25 降 cold
 - **归档**：cold 且 90 天没碰 → 移进 `archive/`，不删；`expires_at` 到期的标 `expired`，主库保留、副库和注入剔除；两者都能 `memory_revive` 找回
-- **审计**：`audit/writes.jsonl`、`audit/injects.jsonl`
+- **审计**：`audit/writes.jsonl`、`audit/reads.jsonl`、`audit/injects.jsonl`；
+  `node tools/metrics.mjs [天数]` 从真实账本算主动读取有效率、无效读取 token、
+  主动写入准确率（24h 后仍保留）和重复写入率，运行页同一口径
 - **两级漏斗**：`search_memory` 只在副库字段上检索（语义 0.35 / 标签 0.15 / 权重 0.15 / 新近 0.15 / 置信 0.10），
   命中后做一跳标签展开（上下位，0.7 衰减）；无关查询返回空，不拿最近的记忆硬凑
 - **读侧工具**：`search_memory`（查副库，只返回 id/摘要/标签/权重）/ `read_memory`（按 section 读主库，单次 ≤800 tok）
@@ -156,6 +161,8 @@ node test/client.mjs    # 客户端 bundle 离线冒烟
 node test/persona.mjs   # 人格闸门 + 20 项探针 + 变更日志
 node test/docs.mjs      # AGENT.md / USER.md：容量门 / 去重 / 失败降级 / 注入预算
 node test/gate.mjs      # 确认闸门灰度：off / warn / enforce
+node test/metrics.mjs   # 真实流量指标口径：读有效率 / 写入准确率 / 重复写入
+node test/personadistill.mjs  # 人格蒸馏：采样脱敏 / 生成审查分离 / 假证据拦截
 node tools/verify-client.mjs   # 重启前体检
 node tools/check.mjs           # 跑起来之后看真实数据
 ```
@@ -188,6 +195,8 @@ $DSH_HOME/dsh-memory/        （默认 $DSH_HOME\dsh-memory）
   （OpenAI 兼容，`BASE` 写到 `/v1`；不配就纯规则）
 - `DSH_MEMORY_EMBED_BASE` / `DSH_MEMORY_EMBED_KEY` / `DSH_MEMORY_EMBED_MODEL` — 可选向量端点
   （Ollama 填 `http://127.0.0.1:11434/v1` + `bge-m3`；不配就纯词法）
+- `DSH_MEMORY_REVIEW_BASE` / `DSH_MEMORY_REVIEW_KEY` / `DSH_MEMORY_REVIEW_MODEL` — 可选人格审查模型；
+  不填就退回主 LLM（仍是单独一次调用、独立提示词），只配主 LLM 时提案里会标 `llm(fallback)`
 
 ## 边界
 

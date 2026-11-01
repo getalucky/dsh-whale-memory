@@ -286,13 +286,11 @@ function renderMarkdown({ at, rows, m, metrics, channel, prev }) {
     line.push(`- ${mark} ${c.name}${c.detail ? ` — ${c.detail}` : ''}`)
   }
   line.push('')
-  line.push('## 本阶段还没实现的指标')
+  line.push('## 真实流量指标（不在评测基座里）')
   line.push('')
-  line.push('- 副库粗筛命中率（阶段 2 主副库）')
-  line.push('- 主动读取有效率 / 无效读取 token（阶段 5 工具化）')
-  line.push('- 多跳增益（阶段 4 标签图谱）')
-  line.push('- 主动写入准确率 / 重复写入率（阶段 7.7 写侧契约）')
-  line.push('- 人设探针通过率（阶段 6 人格迭代）')
+  line.push('- 主动读取有效率 / 无效读取 token、主动写入准确率 / 重复写入率，依赖模型自己的决策；')
+  line.push('  评测集里用假模型跑只会自欺。看 `node tools/metrics.mjs` 或设置页运行状态。')
+  line.push('- 副库粗筛命中率：目前用 recall hit@K 近似，暂不单列。')
   line.push('')
   return line.join('\n')
 }
