@@ -49,6 +49,9 @@ try {
   ok('过滤 harness 元消息')
 
   // 2. 认不出来源的 staging 挪进 orphan/，不再被反复重试
+  //    默认本地会话是收的，这条只在「本地记忆关掉」时才成立，所以先临时关掉。
+  const prevLocal = process.env.DSH_MEMORY_LOCAL_SCOPE
+  process.env.DSH_MEMORY_LOCAL_SCOPE = 'off'
   const sid = 'session-orphan-test'
   await writeFile(join(paths(root).staging, `${sid}.jsonl`), JSON.stringify({ at: new Date().toISOString(), role: 'user', text: '记住：我下周三出差' }) + '\n', 'utf8')
   assert.ok((await listStaging(root)).includes(sid), 'staging 没写进去')
@@ -57,6 +60,8 @@ try {
   assert.equal((await listStaging(root)).includes(sid), false, 'orphan 还在扫描范围里')
   assert.ok(existsSync(join(paths(root).staging, 'orphan', `${sid}.jsonl`)), 'orphan 文件没搬过去')
   assert.ok(existsSync(join(paths(root).staging, 'orphan', 'index.jsonl')), 'orphan 索引没写')
+  if (prevLocal == null) delete process.env.DSH_MEMORY_LOCAL_SCOPE
+  else process.env.DSH_MEMORY_LOCAL_SCOPE = prevLocal
   ok('孤儿 staging 隔离')
 
   // 3. 绑定表读不出来时不许隔离（可能只是正在写），下轮再试

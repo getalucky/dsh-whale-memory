@@ -6,9 +6,14 @@
 
 - **固定人格**：`persona.md` 挂进所有会话的 system prompt（默认全局，含人格与纪律）；注入前去掉区块标记，预算 ≤1200 tok。
   完整来历与旧稿在 `persona_full.md`（只做参考，不注入）。人格沉淀走 `node tools/persona.mjs propose/apply/rollback`，只改 EVOLVABLE 区块，人工确认后版本化落盘。
-- **分片记忆**：`scopes/private-<QQ号>/`、`scopes/group-<群号>/`，私聊和群各记各的；每个分片是「主库 + 派生副库」的目录，旧版单文件 JSON 启动时自动迁移
+- **分片记忆**：`scopes/private-<QQ号>/`、`scopes/group-<群号>/`、`scopes/local-dsh/`；
+  私聊、群、本地会话各记各的。本地会话（桌面 / CLI / Web 直接开的）没有绑定表可查，
+  统一进 `local:dsh` 一个全局分片，不做项目隔离。每个分片都是「主库 + 派生副库」的目录，
+  旧版单文件 JSON 启动时自动迁移
 - **蒸馏**：会话空闲 10 分钟后，从用户消息里提取值得记的事实/偏好/约定
-  （默认规则抽取；配了 `DSH_MEMORY_LLM_*` 就走一次 LLM，失败自动回退规则）
+  （默认规则抽取；配了 `DSH_MEMORY_LLM_*` 就走一次 LLM，失败自动回退规则）。
+  本地会话换一套工程信号词（路径 / 版本 / 「以后都用」/ 约定 / 决定），
+  只记能迁移的结论，不把代码和工具输出当记忆
 - **降维**：每条记忆落盘时生成摘要、受控标签、上级标签、时间线、权重（`lib/enrich.js` + `lib/taxonomy.js`），
   标签只认词表（高数/高等数学/微积分 → 高数），认不出来退回类型标签，不自由生长
 - **预筛**：先看信号词再抽候选；寒暄、问句、工具输出不跑抽取，跳过原因写进 `audit/writes.jsonl`
@@ -45,6 +50,8 @@
     meta.json                画像 / 成员 / 来源标记
     archive/full/            删掉或归档的条目（正文保留，可翻回）
     .rev                     写入版本号（注入层按它判断要不要重画）
+  scopes/local-dsh/          本地会话（桌面 / CLI / Web）的全局记忆，结构同上
+  scopes/group-<群号>/       群记忆，结构同上
 ```
 
 规矩：**先写主库，再写副库**。副库坏了、删了，跑 `node tools/rebuild-index.mjs` 从主库重建；
@@ -78,12 +85,15 @@
 
 ## 数据卫生
 
-- **只收桥接会话**：每条消息落盘前 `await sourceOfSession(sid)`，按 `qq-bridge-config.json`
-  的 mtime 现查，不用启动时的缓存快照（旧版缓存不刷新，Web 开发会话被当成桥接收进来过）
+- **来源判定**：每条消息落盘前 `await sourceOfSession(sid)`，按 `qq-bridge-config.json`
+  的 mtime 现查，不用启动时的缓存快照（旧版缓存不刷新，Web 开发会话被当成桥接收进来过）。
+  绑定表里没有、且配置可读（或根本没配桥接）的会话 = 本地会话，进 `local:dsh`；
+  配置在但读坏/JSON 坏了就先跳过，不把桥接会话误归本地
+- **本地记忆开关**：`DSH_MEMORY_LOCAL_SCOPE=off` 退回只收 QQ 桥接，本地会话连记忆段都不挂
 - **过滤宿主元消息**：`Time sampled while…` / `Browser time zone…` / `Elapsed since…` /
   `<system-reminder>` 这些不是人说的话，直接丢，别占 `KEEP=300` 的名额
-- **孤儿 staging**：认不出来源的会话文件挪进 `staging/orphan/` + 记 `index.jsonl`。
-  不删数据，但也不会每 5 分钟重试一次蒸馏（旧版就卡在这）
+- **孤儿 staging**：本地记忆关掉、或绑定表读坏时，认不出来源的会话文件挪进 `staging/orphan/`
+  + 记 `index.jsonl`。不删数据，但也不会每 5 分钟重试一次蒸馏（旧版就卡在这）
 - **写保护**：工具靠「最近活跃会话」推断分片，超过 10 分钟就拒绝写，宁可失败也不写错人
 - **写队列**：distill / forget / 工具 / 界面删除全走同一把进程内锁，读改写不会互相覆盖
 - **凭据打码**：`sk-` / `ghp_` / `Bearer` / `api_key: xxx` 这类在入库和注入两侧都会换成 `[已隐藏]`
@@ -113,6 +123,7 @@ node test/graph.mjs     # 图谱抽取 + 界面接口
 node test/recall.mjs    # 检索
 node test/profile.mjs   # 画像
 node test/hygiene.mjs   # 元消息 / 孤儿 staging / 手动删除 / 写保护 / 截断
+node test/local.mjs     # 本地会话：采集 → local:dsh → 工程抽取 → 注入 → 工具写
 node test/client.mjs    # 客户端 bundle 离线冒烟
 node tools/verify-client.mjs   # 重启前体检
 node tools/check.mjs           # 跑起来之后看真实数据
@@ -138,6 +149,7 @@ $DSH_HOME/dsh-memory/        （默认 $DSH_HOME\dsh-memory）
 
 - `DSH_MEMORY_HOME` — 记忆库根目录
 - `DSH_MEMORY_PERSONA_SCOPE` — `all`（默认，所有会话都挂人格）/ `bridge`（只挂 QQ 桥接）
+- `DSH_MEMORY_LOCAL_SCOPE` — `on`（默认，本地会话也记）/ `off`（退回只收 QQ 桥接）
 - `DSH_QQ_BRIDGE_CONFIG` — 桥接配置路径（默认 `$DSH_HOME/qq-bridge-config.json`）
 - `DSH_MEMORY_LLM_BASE` / `DSH_MEMORY_LLM_KEY` / `DSH_MEMORY_LLM_MODEL` — 可选蒸馏端点
   （OpenAI 兼容，`BASE` 写到 `/v1`；不配就纯规则）
@@ -147,7 +159,9 @@ $DSH_HOME/dsh-memory/        （默认 $DSH_HOME\dsh-memory）
 ## 边界
 
 - 不建会话、不刷 B 站、不主动说话
-- 来源识别靠桥接绑定表（sessionId → 私聊/群），不解析消息文本
+- 来源识别靠桥接绑定表（sessionId → 私聊/群）；表里没有的算本地会话，进 `local:dsh`，
+  不解析消息文本
+- 本地会话是**一个全局分片**，不按项目/工作区分桶；要分项目得等 global/project 命名空间落地
 - 蒸馏默认规则抽取；LLM 是可选项，失败/超时一律回退规则，不会写半截结果
 - 检索默认词法（字符 n-gram）；向量也是可选项，端点不可达时静默降级
 - 图谱只认「在X上班 / 住在X / 喜欢X / 养了X / 我叫X / X是Y / 在<地名尾缀>」这几种句式，

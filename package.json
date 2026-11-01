@@ -1,10 +1,10 @@
 {
   "name": "dsh-whale-memory",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "大肥鱼的记忆库：固定人格 + 分层记忆 + 用户/群分片 + 蒸馏 + 遗忘归档 + 审计账本。",
   "type": "module",
   "scripts": {
-    "test": "node test/smoke.mjs && node test/vault.mjs && node test/pipeline.mjs && node test/tools.mjs && node test/funnel.mjs && node test/persona.mjs && node test/lifecycle.mjs && node test/trust.mjs && node test/resume.mjs && node test/memory.mjs && node test/apply.mjs && node test/graph.mjs && node test/hygiene.mjs && node test/llm.mjs && node test/profile.mjs && node test/recall.mjs && node test/time.mjs && node test/client.mjs",
+    "test": "node test/smoke.mjs && node test/vault.mjs && node test/pipeline.mjs && node test/tools.mjs && node test/funnel.mjs && node test/local.mjs && node test/persona.mjs && node test/lifecycle.mjs && node test/trust.mjs && node test/resume.mjs && node test/memory.mjs && node test/apply.mjs && node test/graph.mjs && node test/hygiene.mjs && node test/llm.mjs && node test/profile.mjs && node test/recall.mjs && node test/time.mjs && node test/client.mjs",
     "eval": "node test/eval/run.mjs",
     "eval:compare": "node test/eval/run.mjs --compare",
     "rebuild-index": "node tools/rebuild-index.mjs",
