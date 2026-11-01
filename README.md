@@ -162,6 +162,7 @@ $DSH_HOME/dsh-memory/        （默认 $DSH_HOME\dsh-memory）
 - `DSH_MEMORY_HOME` — 记忆库根目录
 - `DSH_MEMORY_PERSONA_SCOPE` — `all`（默认，所有会话都挂人格）/ `bridge`（只挂 QQ 桥接）
 - `DSH_MEMORY_LOCAL_SCOPE` — `on`（默认，本地会话也记）/ `off`（退回只收 QQ 桥接）
+- `DSH_MEMORY_PROJECT_SCOPE` — `on`（默认，仓库里的本地会话可挂 project 命名空间）/ `off`（只有个人库）
 - `DSH_QQ_BRIDGE_CONFIG` — 桥接配置路径（默认 `$DSH_HOME/qq-bridge-config.json`）
 - `DSH_MEMORY_LLM_BASE` / `DSH_MEMORY_LLM_KEY` / `DSH_MEMORY_LLM_MODEL` — 可选蒸馏端点
   （OpenAI 兼容，`BASE` 写到 `/v1`；不配就纯规则）
@@ -173,7 +174,14 @@ $DSH_HOME/dsh-memory/        （默认 $DSH_HOME\dsh-memory）
 - 不建会话、不刷 B 站、不主动说话
 - 来源识别靠桥接绑定表（sessionId → 私聊/群）；表里没有的算本地会话，进 `local:dsh`，
   不解析消息文本
-- 本地会话是**一个全局分片**，不按项目/工作区分桶；要分项目得等 global/project 命名空间落地
+- 本地会话默认进 `local:dsh`；如果 cwd 在一个仓库里（向上找得到 `.git` / `package.json` /
+  `AGENTS.md` 等标记），额外挂一个 **project 命名空间**，库放在 `<repo>/.dsh/storages/whale-memory`，
+  两个库各有独立的 `memory_index.md` 与 `memory_full/`。检索和注入合并两处，写入仍默认进个人库：
+  - 跟这个仓库有关的命令、路径、约定、坑，用 `memory_save(..., namespace="project")` 显式存仓库库；
+  - **自动蒸馏只进个人库**，不把聊天摘要提交进仓库；
+  - 仓库库登记在个人库的 `namespaces.json`，遗忘/深化循环会一起扫；
+  - 设置页只列个人库的分片，仓库库的条目在注入骨架和记忆工具里能看到；
+  - `DSH_MEMORY_PROJECT_SCOPE=off` 关掉；`DSH_HOME` 内和无标记的目录不会被当成仓库。
 - 蒸馏默认规则抽取；LLM 是可选项，失败/超时一律回退规则，不会写半截结果
 - 检索默认词法（字符 n-gram）；向量也是可选项，端点不可达时静默降级
 - 图谱只认「在X上班 / 住在X / 喜欢X / 养了X / 我叫X / X是Y / 在<地名尾缀>」这几种句式，
