@@ -47,7 +47,9 @@
   会话首轮的骨架里会提醒「逾期/一周内到期的承诺 + 进行中话题 + 最重的一条教训」，零 LLM、纯日期比较，不逐轮扫
 - **确认闸门**：`memory_save` 只认用户原话里的「记住 / 纠正 / 长期偏好」信号，有信号才直接生效；
   没有就落 `suggested`（待确认）——不进副库、不进骨架、不参与检索，等用户点头再 `memory_confirm`。
-  待确认条目不占容量位，也不会取代已生效的旧说法；蒸馏链路（规则/LLM 抽取）仍按原来的过滤直接入库
+  待确认条目不占容量位，也不会取代已生效的旧说法；蒸馏链路（规则/LLM 抽取）仍按原来的过滤直接入库。
+  三态灰度：`DSH_MEMORY_GATE=enforce`（默认，真拦）/ `warn`（放行但条目和审计留 `gate=warn` 记号，
+  先看拒绝率）/ `off`（只记录不拦）；运行页会给出 warn / blocked 计数
 - **L3 图谱**：把记忆拆成「实体 —关系→ 实体」，落 `graph/nodes.jsonl` + `graph/edges.jsonl`；
   目前只用于界面展示，不再塞进 system prompt（注入只留规矩段 + 骨架）
 - **界面**：DSH 设置 → 「大肥鱼记忆」，五个页签（总览 / 记忆 / 图谱 / 审计 / 运行）；运行页看人格预算、信任状态、每分片容量、最近检索与跳过原因；记忆页可以删单条，待确认的一栏能点「确认」转正
@@ -153,6 +155,7 @@ node test/watermark.mjs # 蒸馏水位：中途追加不丢，重跑不重
 node test/client.mjs    # 客户端 bundle 离线冒烟
 node test/persona.mjs   # 人格闸门 + 20 项探针 + 变更日志
 node test/docs.mjs      # AGENT.md / USER.md：容量门 / 去重 / 失败降级 / 注入预算
+node test/gate.mjs      # 确认闸门灰度：off / warn / enforce
 node tools/verify-client.mjs   # 重启前体检
 node tools/check.mjs           # 跑起来之后看真实数据
 ```
@@ -179,6 +182,7 @@ $DSH_HOME/dsh-memory/        （默认 $DSH_HOME\dsh-memory）
 - `DSH_MEMORY_PERSONA_SCOPE` — `all`（默认，所有会话都挂人格）/ `bridge`（只挂 QQ 桥接）
 - `DSH_MEMORY_LOCAL_SCOPE` — `on`（默认，本地会话也记）/ `off`（退回只收 QQ 桥接）
 - `DSH_MEMORY_PROJECT_SCOPE` — `on`（默认，仓库里的本地会话可挂 project 命名空间）/ `off`（只有个人库）
+- `DSH_MEMORY_GATE` — confirm 闸门灰度：`enforce`（默认）/ `warn`（放行但留记号）/ `off`（不拦）
 - `DSH_QQ_BRIDGE_CONFIG` — 桥接配置路径（默认 `$DSH_HOME/qq-bridge-config.json`）
 - `DSH_MEMORY_LLM_BASE` / `DSH_MEMORY_LLM_KEY` / `DSH_MEMORY_LLM_MODEL` — 可选蒸馏端点
   （OpenAI 兼容，`BASE` 写到 `/v1`；不配就纯规则）
