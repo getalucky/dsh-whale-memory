@@ -32,10 +32,14 @@
   命中后做一跳标签展开（上下位，0.7 衰减）；无关查询返回空，不拿最近的记忆硬凑
 - **读侧工具**：`search_memory`（查副库，只返回 id/摘要/标签/权重）/ `read_memory`（按 section 读主库，单次 ≤800 tok）
   / `profile_show`；旧的 `memory_recall` 作为别名保留
-- **写侧工具**：`memory_save`（必须带 `source_quote` 用户原话）/ `memory_correct` / `memory_forget` / `memory_revive`（从归档或过期里找回）
+- **写侧工具**：`memory_save`（必须带 `source_quote` 用户原话）/ `memory_pending`（看待确认）/ `memory_confirm`（点头转正）
+  / `memory_correct` / `memory_forget` / `memory_revive`（从归档或过期里找回）
+- **确认闸门**：`memory_save` 只认用户原话里的「记住 / 纠正 / 长期偏好」信号，有信号才直接生效；
+  没有就落 `suggested`（待确认）——不进副库、不进骨架、不参与检索，等用户点头再 `memory_confirm`。
+  待确认条目不占容量位，也不会取代已生效的旧说法；蒸馏链路（规则/LLM 抽取）仍按原来的过滤直接入库
 - **L3 图谱**：把记忆拆成「实体 —关系→ 实体」，落 `graph/nodes.jsonl` + `graph/edges.jsonl`；
   目前只用于界面展示，不再塞进 system prompt（注入只留规矩段 + 骨架）
-- **界面**：DSH 设置 → 「大肥鱼记忆」，五个页签（总览 / 记忆 / 图谱 / 审计 / 运行）；运行页看人格预算、信任状态、每分片容量、最近检索与跳过原因；记忆页可以删单条
+- **界面**：DSH 设置 → 「大肥鱼记忆」，五个页签（总览 / 记忆 / 图谱 / 审计 / 运行）；运行页看人格预算、信任状态、每分片容量、最近检索与跳过原因；记忆页可以删单条，待确认的一栏能点「确认」转正
 
 ## 数据长什么样
 
