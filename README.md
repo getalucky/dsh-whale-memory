@@ -100,6 +100,8 @@
   + 记 `index.jsonl`。不删数据，但也不会每 5 分钟重试一次蒸馏（旧版就卡在这）
 - **写保护**：工具靠「最近活跃会话」推断分片，超过 10 分钟就拒绝写，宁可失败也不写错人
 - **写队列**：distill / forget / 工具 / 界面删除全走同一把进程内锁，读改写不会互相覆盖
+- **水位断点**：蒸馏按「这轮读到的前缀」消费 staging，调 LLM 那 20 秒里新进来的消息留着下一轮；
+  落库成功但没来得及消费就崩了，重跑靠合并去重，不会记两遍（`test/watermark.mjs`）
 - **凭据打码**：`sk-` / `ghp_` / `Bearer` / `api_key: xxx` 这类在入库和注入两侧都会换成 `[已隐藏]`
 - **删除**：`memory_forget` 工具 / 记忆页的 `×` 都只做归档（`archive/*.jsonl` + 审计），能翻回来
 
@@ -128,6 +130,8 @@ node test/recall.mjs    # 检索
 node test/profile.mjs   # 画像
 node test/hygiene.mjs   # 元消息 / 孤儿 staging / 手动删除 / 写保护 / 截断
 node test/local.mjs     # 本地会话：采集 → local:dsh → 工程抽取 → 注入 → 工具写
+node test/confirm.mjs   # 确认闸门：suggested 不进目录，点头才生效
+node test/watermark.mjs # 蒸馏水位：中途追加不丢，重跑不重
 node test/client.mjs    # 客户端 bundle 离线冒烟
 node tools/verify-client.mjs   # 重启前体检
 node tools/check.mjs           # 跑起来之后看真实数据
