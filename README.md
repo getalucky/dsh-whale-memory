@@ -11,6 +11,11 @@
   没配 LLM 就退回规则候选，失败不写半截提案。
 - **人格探针**：20 项静态体检（区块 / 预算 / 不自曝 / 不写事件与日期 / 不写路径与凭据 / 称呼与语气规则在不在）。
   `propose` 时给人看，`apply` 前后各跑一次，通过项数掉了就拒绝应用；变更写进 `persona_changelog.md`（版本、新增规则、依据的记忆 id）。
+- **人格自动迭代**：每小时看一次，只有「距上次迭代 ≥24h + 累计 ≥100 条有效用户消息 + ≥20 条有效样本」
+  齐了才出提案；出提案不等于改人格。自动发布还要过「本周没发布过 + 确认闸门在 enforce + 连续 3 次人工通过」，
+  否则只落 `persona_proposal.json` 等人工 `apply`。拒绝用 `persona.mjs reject --why "原因"`，会清零连续计数，
+  同一规则 30 天内不再提；回滚也清零。「每周最多一个 revision」对自动发布硬拦，人工紧急用 `apply --force`。
+  关掉自动跑：`DSH_MEMORY_PERSONA_AUTO=off`（CLI 手动流程不受影响）。
 - **经验与画像**：`AGENT.md`（原则 / 路径 / 坑，≤3000 字符）和 `USER.md`（偏好 / 习惯 / 红线 / 背景，≤3000 字符）
   两份独立文件，跟 `persona.md` 分家。偏好和教训在记忆**转正之后**自动沉淀（待确认的不进），
   每条带主库指针；一条经验连续两次「按它做还是失败」自动标待复核并退出注入，一次成功就恢复。
@@ -159,6 +164,7 @@ node test/confirm.mjs   # 确认闸门：suggested 不进目录，点头才生�
 node test/watermark.mjs # 蒸馏水位：中途追加不丢，重跑不重
 node test/client.mjs    # 客户端 bundle 离线冒烟
 node test/persona.mjs   # 人格闸门 + 20 项探针 + 变更日志
+node test/personaauto.mjs # 人格自动迭代：门槛 / 每周一次 / 连续通过 / 拒绝清零
 node test/docs.mjs      # AGENT.md / USER.md：容量门 / 去重 / 失败降级 / 注入预算
 node test/gate.mjs      # 确认闸门灰度：off / warn / enforce
 node test/metrics.mjs   # 真实流量指标口径：读有效率 / 写入准确率 / 重复写入
@@ -187,6 +193,7 @@ $DSH_HOME/dsh-memory/        （默认 $DSH_HOME\dsh-memory）
 
 - `DSH_MEMORY_HOME` — 记忆库根目录
 - `DSH_MEMORY_PERSONA_SCOPE` — `all`（默认，所有会话都挂人格）/ `bridge`（只挂 QQ 桥接）
+- `DSH_MEMORY_PERSONA_AUTO` — 人格自动迭代：`on`（默认，每小时检查）/ `off`（只留手动 CLI）
 - `DSH_MEMORY_LOCAL_SCOPE` — `on`（默认，本地会话也记）/ `off`（退回只收 QQ 桥接）
 - `DSH_MEMORY_PROJECT_SCOPE` — `on`（默认，仓库里的本地会话可挂 project 命名空间）/ `off`（只有个人库）
 - `DSH_MEMORY_GATE` — confirm 闸门灰度：`enforce`（默认）/ `warn`（放行但留记号）/ `off`（不拦）
