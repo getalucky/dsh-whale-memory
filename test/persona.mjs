@@ -18,6 +18,7 @@ import {
   propose, applyProposal, rollback, status, parsePersona, personaTokens,
   stripMarkers, hashOf, PERSONA,
 } from '../lib/persona.js'
+import { runProbes } from '../lib/probes.js'
 
 let pass = 0
 const ok = (name) => { pass += 1; console.log('  ok', name) }
@@ -53,9 +54,17 @@ try {
   assert.ok(p.additions.some((a) => /结论/.test(a.rule)))
   ok('propose：从记忆里抽到 emoji / 先给结论两条候选')
 
+  // 探针：固定 20 项，结构 / 边界 / 卫生都算
+  const probe0 = runProbes(ORIGINAL, parsePersona(ORIGINAL), personaTokens(ORIGINAL))
+  assert.equal(probe0.total, 20, JSON.stringify(probe0))
+  assert.ok(probe0.passed > 0, JSON.stringify(probe0))
+  assert.equal(probe0.passed + probe0.failed.length, probe0.total)
+  ok('probe：20 项，通过 + 失败 = 总数')
+
   // 应用：只改 EVOLVABLE
   const r = await applyProposal(root, join(root, PERSONA.proposal))
   assert.ok(r.applied >= 2, JSON.stringify(r))
+  assert.ok(r.probes.passed >= probe0.passed, JSON.stringify(r.probes))
   const after = await readFile(join(root, 'persona.md'), 'utf8')
   assert.ok(after.includes('少用 emoji'), after)
   assert.ok(after.includes('你是测试鲸鱼'), '核心身份被改了')
@@ -63,6 +72,13 @@ try {
   const blocks = parsePersona(after)
   assert.ok(blocks.hasCore && blocks.hasEvolvable)
   ok('apply：只往 EVOLVABLE 追加，核心与纪律原样')
+
+  // 变更日志：版本、规则、依据、探针数都要留痕
+  const log = await readFile(join(root, PERSONA.changelog), 'utf8')
+  assert.ok(/## v1 ·/.test(log), log)
+  assert.ok(log.includes('少用 emoji'), log)
+  assert.ok(/依据：.+_/.test(log), log)
+  ok('changelog：记下版本、规则与证据 id')
 
   // 归档
   const arch0 = await readFile(join(root, PERSONA.archiveDir, 'v0.md'), 'utf8')
@@ -92,6 +108,21 @@ try {
   assert.equal(rb.version, 0)
   assert.equal(await readFile(join(root, 'persona.md'), 'utf8'), ORIGINAL)
   ok('rollback：回到 v0')
+
+  // 探针回退：往 EVOLVABLE 塞事件和自曝，通过项数下降就拒绝
+  const cur = await readFile(join(root, 'persona.md'), 'utf8')
+  const badRule = join(root, 'bad-rule.json')
+  await writeFile(badRule, JSON.stringify({
+    schema: 1, at: new Date().toISOString(), baselineHash: hashOf(cur),
+    additions: [{ rule: '昨天帮爹修了桥接，作为一个 AI 语言模型要多帮忙。' }],
+  }), 'utf8')
+  await assert.rejects(() => applyProposal(root, badRule), /探针/)
+  ok('探针回退 → 拒绝应用（事件进人设 / 自曝 AI）')
+
+  const badText = `<!-- PERSONA:EVOLVABLE:START -->\n作为一个 AI 语言模型，我会尽力。\n<!-- PERSONA:EVOLVABLE:END -->`
+  const badProbe = runProbes(badText, parsePersona(badText), personaTokens(badText))
+  assert.ok(badProbe.failed.some((f) => f.id === 'self'), JSON.stringify(badProbe))
+  ok('probe：自曝 AI 被单独抓出来')
 
   // 注入前去掉标记，且预算计算不含标记
   assert.ok(!stripMarkers(ORIGINAL).includes('PERSONA:'), stripMarkers(ORIGINAL))

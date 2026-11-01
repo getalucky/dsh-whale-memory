@@ -6,6 +6,8 @@
 
 - **固定人格**：`persona.md` 挂进所有会话的 system prompt（默认全局，含人格与纪律）；注入前去掉区块标记，预算 ≤1200 tok。
   完整来历与旧稿在 `persona_full.md`（只做参考，不注入）。人格沉淀走 `node tools/persona.mjs propose/apply/rollback`，只改 EVOLVABLE 区块，人工确认后版本化落盘。
+- **人格探针**：20 项静态体检（区块 / 预算 / 不自曝 / 不写事件与日期 / 不写路径与凭据 / 称呼与语气规则在不在）。
+  `propose` 时给人看，`apply` 前后各跑一次，通过项数掉了就拒绝应用；变更写进 `persona_changelog.md`（版本、新增规则、依据的记忆 id）。
 - **分片记忆**：`scopes/private-<QQ号>/`、`scopes/group-<群号>/`、`scopes/local-dsh/`；
   私聊、群、本地会话各记各的。本地会话（桌面 / CLI / Web 直接开的）没有绑定表可查，
   统一进 `local:dsh` 一个全局分片，不做项目隔离。每个分片都是「主库 + 派生副库」的目录，
@@ -50,6 +52,8 @@
 ```text
 <DSH_HOME>/dsh-memory/
   persona.md                 人格（会话创建时快照）
+  persona_changelog.md       人格变更日志（版本 / 规则 / 依据 / 探针）
+  persona_archive/           人格历史版本，可 rollback
   scopes/private-<QQ号>/
     memory_full/{id}.md      主库：唯一真源，一条一段完整记录
     memory_index.md          副库：派生目录，≤32KB，可删可重建
@@ -137,6 +141,7 @@ node test/local.mjs     # 本地会话：采集 → local:dsh → 工程抽取 �
 node test/confirm.mjs   # 确认闸门：suggested 不进目录，点头才生效
 node test/watermark.mjs # 蒸馏水位：中途追加不丢，重跑不重
 node test/client.mjs    # 客户端 bundle 离线冒烟
+node test/persona.mjs   # 人格闸门 + 20 项探针 + 变更日志
 node tools/verify-client.mjs   # 重启前体检
 node tools/check.mjs           # 跑起来之后看真实数据
 ```
