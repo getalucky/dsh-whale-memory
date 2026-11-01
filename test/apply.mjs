@@ -62,7 +62,7 @@ handlers['agent/created']?.[0]?.({
 await new Promise((r) => setTimeout(r, 400))
 console.log('sections:', sections.map((s) => `${s.name}@${s.order}`).join(', '))
 
-// 非桥接会话：人格照样挂（全局），记忆不能挂
+// 非桥接会话：人格 + 记忆都挂（本地会话归 local:dsh）
 const before = sections.length
 handlers['agent/created']?.[0]?.({
   agent: {
@@ -70,9 +70,12 @@ handlers['agent/created']?.[0]?.({
     ctx: { systemPrompt: { section(s) { sections.push(s) } } },
   },
 })
-await new Promise((r) => setTimeout(r, 100))
-assert.equal(sections.length, before + 1, '非桥接会话应该只挂一个人格段')
-assert.equal(sections[before].name, 'whale:persona', '非桥接会话挂的不是人格段')
+await new Promise((r) => setTimeout(r, 200))
+const local = sections.slice(before)
+assert.equal(local.length, 2, `非桥接会话应该挂人格 + 记忆两段，实际 ${local.length}`)
+assert.equal(local[0].name, 'whale:persona', '非桥接会话第一段不是人格段')
+assert.equal(local[1].name, 'whale:memory', '非桥接会话第二段不是记忆段')
+assert.ok(String(local[1].text()).includes('记忆使用规矩'), '本地记忆段没注入规矩段')
 
 assert.ok(sections.some((s) => s.name === 'whale:persona'), '人格段没挂上')
 assert.ok(sections.some((s) => s.name === 'whale:memory'), '记忆段没挂上')

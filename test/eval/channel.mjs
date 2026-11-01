@@ -101,28 +101,28 @@ export async function runChannelChecks({ root, bridgeSid, scope, nonBridgeSid = 
     off()
   }
 
-  // ── 2. 非桥接会话：人格挂、记忆不挂 ──
+  // ── 2. 非桥接会话：人格挂、记忆进本地分片 ──
   {
     const h = makeHost()
     const off = registerInjection(h.ctx, { root, log: logOf(h) })
     fire(h.handlers, agentOf(nonBridgeSid, h.systemPrompt))
     const names = h.sections.map((s) => s.name)
     add(
-      '非桥接会话不注入记忆',
-      !names.includes(MEMORY_SECTION),
+      '非桥接会话进本地分片',
+      names.includes(MEMORY_SECTION) && names.includes(PERSONA_SECTION),
       `sections=${names.join(',') || '（空）'}`,
     )
     off()
   }
 
-  // ── 3. persona.scope=bridge 时，本地会话连人格也不挂 ──
+  // ── 3. persona.scope=bridge 时，本地会话不挂人格（记忆仍按本地开关） ──
   {
     const h = makeHost()
     const off = registerInjection(h.ctx, { root, log: logOf(h), persona: { scope: 'bridge' } })
     fire(h.handlers, agentOf(nonBridgeSid, h.systemPrompt))
     add(
       'persona.scope=bridge 只挂桥接',
-      h.sections.length === 0,
+      !h.sections.some((s) => s.name === PERSONA_SECTION),
       `sections=${h.sections.map((s) => s.name).join(',') || '（空）'}`,
     )
     fire(h.handlers, agentOf(bridgeSid, h.systemPrompt))
