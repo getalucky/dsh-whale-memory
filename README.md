@@ -8,6 +8,10 @@
   完整来历与旧稿在 `persona_full.md`（只做参考，不注入）。人格沉淀走 `node tools/persona.mjs propose/apply/rollback`，只改 EVOLVABLE 区块，人工确认后版本化落盘。
 - **人格探针**：20 项静态体检（区块 / 预算 / 不自曝 / 不写事件与日期 / 不写路径与凭据 / 称呼与语气规则在不在）。
   `propose` 时给人看，`apply` 前后各跑一次，通过项数掉了就拒绝应用；变更写进 `persona_changelog.md`（版本、新增规则、依据的记忆 id）。
+- **经验与画像**：`AGENT.md`（原则 / 路径 / 坑，≤3000 字符）和 `USER.md`（偏好 / 习惯 / 红线 / 背景，≤3000 字符）
+  两份独立文件，跟 `persona.md` 分家。偏好和教训在记忆**转正之后**自动沉淀（待确认的不进），
+  每条带主库指针；一条经验连续两次「按它做还是失败」自动标待复核并退出注入，一次成功就恢复。
+  文件可手改、可 git diff，容量到顶先丢最老的非待复核条目。
 - **分片记忆**：`scopes/private-<QQ号>/`、`scopes/group-<群号>/`、`scopes/local-dsh/`；
   私聊、群、本地会话各记各的。本地会话（桌面 / CLI / Web 直接开的）没有绑定表可查，
   统一进 `local:dsh` 一个全局分片，不做项目隔离。每个分片都是「主库 + 派生副库」的目录，
@@ -36,6 +40,7 @@
   / `profile_show`；旧的 `memory_recall` 作为别名保留
 - **写侧工具**：`memory_save`（必须带 `source_quote` 用户原话）/ `memory_pending`（看待确认）/ `memory_confirm`（点头转正）
   / `memory_correct` / `memory_update`（只改话题进展、承诺到期，不新建）/ `memory_forget` / `memory_revive`（从归档或过期里找回）
+  / `memory_experience`（看 / 增经验与画像，`ok` / `fail` 记一次用后结果，连续失败两次自动待复核）
 - **三类特殊记忆**：`lesson` 教训（必填 `trigger`「当……时」+ `anti_pattern`，写不出来就不是教训）、
   `topic` 进行中话题（必填 `goal`，进展变化用 `memory_update` 改，不新建条目）、
   `commitment` 承诺（必填 `due` / `to_whom`，日期或「下次提到 X 时」）。
@@ -54,6 +59,8 @@
   persona.md                 人格（会话创建时快照）
   persona_changelog.md       人格变更日志（版本 / 规则 / 依据 / 探针）
   persona_archive/           人格历史版本，可 rollback
+  AGENT.md                   经验（原则 / 路径 / 坑，≤3000 字符，可手改）
+  USER.md                    画像（偏好 / 习惯 / 红线 / 背景，≤3000 字符，可手改）
   scopes/private-<QQ号>/
     memory_full/{id}.md      主库：唯一真源，一条一段完整记录
     memory_index.md          副库：派生目录，≤32KB，可删可重建
@@ -79,6 +86,9 @@
 - **记忆段 = 规矩段 + 目录骨架**：规矩段是常量（怎么查、什么时候写、什么不许写），骨架是
   标签树 + 每类 Top-2 + 计数 + 版本号，总预算 ≤1600 tok。**正文不再常驻**，模型要详情必须
   `search_memory` → `read_memory`。
+- **经验与画像段**：`AGENT.md` / `USER.md` 各挑最多 3 条跟当前分片、仓库相关的条目，
+  总共 ≤420 字，接在骨架后面。会话首轮挑一次，中途不重挑；`USER.md` 有内容时
+  骨架里的画像摘要就不再重复。要看全文用 `memory_experience(action="show")`。
 - 骨架刷新：文件变了也要「≥5 分钟 + 活跃条目变化 ≥3 条」才重建，删除立即生效。
   每轮命中的条目只记在内存里，不再逐条消息重画 system prompt。
 
@@ -142,6 +152,7 @@ node test/confirm.mjs   # 确认闸门：suggested 不进目录，点头才生�
 node test/watermark.mjs # 蒸馏水位：中途追加不丢，重跑不重
 node test/client.mjs    # 客户端 bundle 离线冒烟
 node test/persona.mjs   # 人格闸门 + 20 项探针 + 变更日志
+node test/docs.mjs      # AGENT.md / USER.md：容量门 / 去重 / 失败降级 / 注入预算
 node tools/verify-client.mjs   # 重启前体检
 node tools/check.mjs           # 跑起来之后看真实数据
 ```
