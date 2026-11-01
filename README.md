@@ -14,10 +14,8 @@
 **方式一：脚本（在本仓库里）**
 
 ```bash
-npm pack                                   # 产出 dsh-whale-memory-<版本>.tgz
-# 关掉 DSH，然后
 export DSH_HOME=/path/to/dsh               # Windows: set DSH_HOME=D:\dsh
-node tools/deploy.mjs
+node tools/deploy.mjs                      # 打包 + 装机，一条命令干完
 ```
 
 脚本会打包 → 放进 `profile/vendor/` → 改 `profile/package.json` 的 `dependencies` 和 `dsh.profile.bundles` → `pnpm install` → 核对装机的 `lib/client.js` 和工作区一致。任何一步失败都会还原配置，不会留下半装状态。
