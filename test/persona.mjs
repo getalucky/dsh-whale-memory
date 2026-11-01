@@ -89,7 +89,7 @@ try {
 
   // 基线变了：原提案不能再用
   await writeFile(join(root, 'persona.md'), after.replace('说话短一点。', '说话短一点，别废话。'), 'utf8')
-  await assert.rejects(() => applyProposal(root, join(root, PERSONA.proposal)), /冲突/)
+  await assert.rejects(() => applyProposal(root, join(root, PERSONA.proposal), { force: true }), /冲突/)
   ok('基线被改过 → 拒绝应用')
 
   // 超预算拒绝
@@ -99,7 +99,7 @@ try {
   await writeFile(badProposal, JSON.stringify({
     schema: 1, at: new Date().toISOString(), baselineHash: hashOf(big), additions: [{ rule: '再加一条' }],
   }), 'utf8')
-  await assert.rejects(() => applyProposal(root, badProposal), /预算/)
+  await assert.rejects(() => applyProposal(root, badProposal, { force: true }), /预算/)
   ok('超预算 → 拒绝应用')
 
   // 回滚
@@ -116,7 +116,7 @@ try {
     schema: 1, at: new Date().toISOString(), baselineHash: hashOf(cur),
     additions: [{ rule: '昨天帮爹修了桥接，作为一个 AI 语言模型要多帮忙。' }],
   }), 'utf8')
-  await assert.rejects(() => applyProposal(root, badRule), /探针/)
+  await assert.rejects(() => applyProposal(root, badRule, { force: true }), /探针/)
   ok('探针回退 → 拒绝应用（事件进人设 / 自曝 AI）')
 
   const badText = `<!-- PERSONA:EVOLVABLE:START -->\n作为一个 AI 语言模型，我会尽力。\n<!-- PERSONA:EVOLVABLE:END -->`
