@@ -58,7 +58,7 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
   统一进 `local:dsh` 一个全局分片，不做项目隔离。每个分片都是「主库 + 派生副库」的目录，
   旧版单文件 JSON 启动时自动迁移
 - **蒸馏**：会话空闲 10 分钟后，从用户消息里提取值得记的事实/偏好/约定
-  （默认规则抽取；配了 `DSH_MEMORY_LLM_*` 就走一次 LLM，失败自动回退规则）。
+  （默认规则抽取；设置页「大肥鱼记忆 → 模型」填了端点、或配了 `DSH_MEMORY_LLM_*`，就先走一次 LLM，失败自动回退规则）。
   本地会话换一套工程信号词（路径 / 版本 / 「以后都用」/ 约定 / 决定），
   只记能迁移的结论，不把代码和工具输出当记忆
 - **降维**：每条记忆落盘时生成摘要、受控标签、上级标签、时间线、权重（`lib/enrich.js` + `lib/taxonomy.js`），
@@ -163,7 +163,7 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
   + 记 `index.jsonl`。不删数据，但也不会每 5 分钟重试一次蒸馏（旧版就卡在这）
 - **写保护**：工具靠「最近活跃会话」推断分片，超过 10 分钟就拒绝写，宁可失败也不写错人
 - **写队列**：distill / forget / 工具 / 界面删除全走同一把进程内锁，读改写不会互相覆盖
-- **水位断点**：蒸馏按「这轮读到的前缀」消费 staging，调 LLM 那 20 秒里新进来的消息留着下一轮；
+- **水位断点**：蒸馏按「这轮读到的前缀」消费 staging，调 LLM 那 8 秒里新进来的消息留着下一轮；
   落库成功但没来得及消费就崩了，重跑靠合并去重，不会记两遍（`test/watermark.mjs`）
 - **凭据打码**：`sk-` / `ghp_` / `Bearer` / `api_key: xxx` 这类在入库和注入两侧都会换成 `[已隐藏]`
 - **删除**：`memory_forget` 工具 / 记忆页的 `×` 都只做归档（`archive/*.jsonl` + 审计），能翻回来
@@ -238,7 +238,9 @@ $DSH_HOME/dsh-memory/        （可用 DSH_MEMORY_HOME 改到别处）
 - `DSH_MEMORY_GATE` — confirm 闸门灰度：`enforce`（默认）/ `warn`（放行但留记号）/ `off`（不拦）
 - `DSH_QQ_BRIDGE_CONFIG` — 桥接配置路径（默认 `$DSH_HOME/qq-bridge-config.json`）
 - `DSH_MEMORY_LLM_BASE` / `DSH_MEMORY_LLM_KEY` / `DSH_MEMORY_LLM_MODEL` — 可选蒸馏端点
-  （OpenAI 兼容，`BASE` 写到 `/v1`；不配就纯规则）
+  （OpenAI 兼容，`BASE` 写到 `/v1`；不配就纯规则）。设置页「模型」里填的优先于这里，
+  key 落盘在 `<库>/settings.json`（界面只回显尾巴）；不确定模型名就点「探测可用模型」，
+  会拉 `/models` 再逐个实测，能用的直接点选（探测不落盘，但会消耗少量额度）
 - `DSH_MEMORY_EMBED_BASE` / `DSH_MEMORY_EMBED_KEY` / `DSH_MEMORY_EMBED_MODEL` — 可选向量端点
   （Ollama 填 `http://127.0.0.1:11434/v1` + `bge-m3`；不配就纯词法）
 - `DSH_MEMORY_REVIEW_BASE` / `DSH_MEMORY_REVIEW_KEY` / `DSH_MEMORY_REVIEW_MODEL` — 可选人格审查模型；
