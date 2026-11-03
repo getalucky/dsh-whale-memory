@@ -60,9 +60,16 @@ const DSH在跑 = () => {
 const 摘要 = (文件) => createHash('sha256').update(readFileSync(文件)).digest('hex')
 
 if (DSH在跑()) {
-  console.error('\nDSH 正在运行。先把它关掉，再跑这个脚本；装完再打开。')
-  console.error('（运行中替换 node_modules 就是 2026-10-30 那几次崩溃的成因。）')
-  process.exit(1)
+  // 2026-11-02：这台机器开了崩溃自动重启，taskkill 之后两秒又被 explorer 拉起来，
+  // 脚本永远等不到「干净」那一刻。给个逃生口，但装完必须自己重启才生效。
+  if (process.env.DSH_MEMORY_DEPLOY_FORCE === '1') {
+    console.log('\n[警告] 强制安装：DSH 还在跑。装完立刻重启，别拿这一份当已生效。')
+  } else {
+    console.error('\nDSH 正在运行。先把它关掉，再跑这个脚本；装完再打开。')
+    console.error('（运行中替换 node_modules 就是 2026-10-30 那几次崩溃的成因。）')
+    console.error('实在关不掉：DSH_MEMORY_DEPLOY_FORCE=1 node tools/deploy.mjs，装完手动重启。')
+    process.exit(1)
+  }
 }
 
 const 包 = JSON.parse(readFileSync(join(根, 'package.json'), 'utf8'))
