@@ -24,7 +24,7 @@ const { ensureDirs, listScopes, loadScope, paths } = await import('../lib/store.
 const { preloadSources, sourceOfSession, resetSourceCache } = await import('../lib/source.js')
 const { registerIngest, flush, readStagingLines, lastActive } = await import('../lib/ingest.js')
 const { distillSession, extractCandidates } = await import('../lib/distill.js')
-const { registerInjection, resetCaches, MEMORY_SECTION } = await import('../lib/inject.js')
+const { registerInjection, resetCaches, MEMORY_SECTION, PERSONA_SECTION } = await import('../lib/inject.js')
 const { registerTools } = await import('../lib/tools.js')
 
 let pass = 0
@@ -104,6 +104,14 @@ try {
   assert.ok(mem, `本地会话没挂记忆段：${sections.map((s) => s.name).join(',')}`)
   assert.ok(String(mem.text()).includes('记忆使用规矩'), '记忆段缺规矩')
   ok('本地会话注入记忆段')
+
+  // 5b. 预设切换：宿主 recompose 会把预设那层拆掉重挂，段得在新层补回来
+  const before = sections.length
+  for (const fn of handlers.get('session/event') || []) fn({ header: { id: sid } }, { type: 'agent-preset/selected', data: { agentPreset: 'standard' } })
+  const after = sections.slice(before)
+  assert.ok(after.some((s) => s.name === PERSONA_SECTION), `预设切换后没重挂人格段：${after.map((s) => s.name).join(',')}`)
+  assert.ok(after.some((s) => s.name === MEMORY_SECTION), `预设切换后没重挂记忆段：${after.map((s) => s.name).join(',')}`)
+  ok('预设切换后重挂人格/记忆段')
 
   // 6. 工具：活跃会话是本地时，memory_save 写进 local:dsh
   const tools = []
