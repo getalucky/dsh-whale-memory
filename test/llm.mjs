@@ -19,7 +19,7 @@ process.env.DSH_MEMORY_EMBED_BASE = 'http://stub.local/v1'
 process.env.DSH_MEMORY_EMBED_MODEL = 'stub-embed'
 
 const {
-  llmReady, embedReady, parseCandidates, distillMessages, embedTexts,
+  llmReady, embedReady, parseCandidates, distillMessages, embedTexts, lastLlmError,
 } = await import('../lib/llm.js')
 const { fuseRankings } = await import('../lib/recall.js')
 const { ensureDirs, loadScope, paths } = await import('../lib/store.js')
@@ -82,6 +82,22 @@ try {
   assert.equal(await distillMessages([{ at: '', text: 'x' }], { fetchImpl: fail }), null)
   assert.equal(await embedTexts(['a', 'b'], { fetchImpl: fail }), null)
   ok('端点失败返回 null，不写半截结果')
+
+  // 失败要能说出原因；5xx 重试一次，401 不重试
+  let flaky = 0
+  const unavailable = async () => { flaky += 1; return { ok: false, status: 503, text: async () => 'busy' } }
+  assert.equal(await distillMessages([{ at: '', text: 'x' }], { fetchImpl: unavailable }), null)
+  assert.equal(flaky, 2, '5xx 应该重试一次')
+  assert.match(lastLlmError(), /HTTP 503 · busy/)
+  let denied = 0
+  const unauthorized = async () => { denied += 1; return { ok: false, status: 401 } }
+  assert.equal(await distillMessages([{ at: '', text: 'x' }], { fetchImpl: unauthorized }), null)
+  assert.equal(denied, 1, '401 不该重试')
+  assert.match(lastLlmError(), /HTTP 401/)
+  const empty = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '' } }] }) })
+  assert.equal(await distillMessages([{ at: '', text: 'x' }], { fetchImpl: empty }), null)
+  assert.match(lastLlmError(), /空 content/)
+  ok('失败原因可诊断 + 只对 5xx/429 重试')
 
   const vecs = await embedTexts(['a', 'b'], { fetchImpl: embedStub })
   assert.deepEqual(vecs, [[1, 0], [0, 1]])

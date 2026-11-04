@@ -91,6 +91,8 @@ try {
   assert.equal(members[0].name, '老爹')
   assert.equal(members[0].items, 2)
   assert.equal(members[0].last, '10-31')
+  assert.ok(members[0].note.includes('钓鱼') || members[0].note.includes('鱼竿'), '成员画像：' + members[0].note)
+  assert.ok(!members[0].note.startsWith('老爹'), '画像里不该重复昵称：' + members[0].note)
   grp.members = members
   grp.profile = { summary: '这个群：记得 3 件事。' }
   assert.ok(renderMemory(grp).includes('【群里的人】'), renderMemory(grp))

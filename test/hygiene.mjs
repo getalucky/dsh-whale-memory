@@ -20,7 +20,8 @@ const {
   ensureDirs, paths, loadScope, saveScope, addItem, readJson,
 } = await import('../lib/store.js')
 const {
-  isMetaMessage, quarantineStaging, listStaging, lastActive,
+  isMetaMessage, stripSystemBlocks, registerIngest, flush, readStagingLines,
+  quarantineStaging, listStaging, lastActive,
 } = await import('../lib/ingest.js')
 const { distillSession } = await import('../lib/distill.js')
 const { forgetItem } = await import('../lib/forget.js')
@@ -47,6 +48,37 @@ try {
   assert.equal(isMetaMessage('Current DeepSeek Harness Web GUI URL: "http://127.0.0.1:55666".'), true)
   assert.equal(isMetaMessage('老爹明天上班吗'), false)
   ok('过滤 harness 元消息')
+
+  // 1b. 整块提醒按块丢，不能拆行后逐行判断
+  //     2026-11-04 实盘：skill-catalog 只有首行带 <system-reminder>，
+  //     拆开后每个 skill 一行，全被当成人话收进 staging。
+  assert.equal(stripSystemBlocks('吃过饭啦\n<system-reminder>宿主说明</system-reminder>'), '吃过饭啦')
+  assert.equal(stripSystemBlocks('<system-reminder>整块说明</system-reminder>'), '')
+  {
+    const handlers = new Map()
+    const ctx = {
+      on(ev, fn) { if (!handlers.has(ev)) handlers.set(ev, []); handlers.get(ev).push(fn); return () => {} },
+    }
+    registerIngest(ctx, { root, log: () => {} })
+    const sidMeta = 'session-meta-test'
+    const emit = (source, text) => {
+      for (const fn of handlers.get('session/event') || []) {
+        fn(
+          { header: { id: sidMeta, cwd: 'C:/work/demo' } },
+          { type: 'user/message', data: { source, content: [{ type: 'text', text }] } },
+        )
+      }
+    }
+    emit({ kind: 'skill-catalog' }, '<system-reminder>\nA skill is a reusable set of task-specific instructions.\n<available_skills>\n- `office`: 文档\n- `office-xlsx`: 表格\n</available_skills>\n</system-reminder>')
+    emit({ kind: 'heartbeat' }, '当前本地时间：2026-11-04 12:59（GMT+8）。\n心跳此刻：在场待着。')
+    emit({ kind: 'time-context' }, 'Time sampled while preparing turn 1, step 1: 2026-11-04T12:59:20+08:00[Asia/Shanghai]')
+    emit({ kind: 'user' }, '吃过饭啦\n<system-reminder>宿主追加的说明</system-reminder>')
+    await flush()
+    const rows = (await readStagingLines(root, sidMeta)).map((l) => JSON.parse(l))
+    assert.equal(rows.length, 1, `应只留 1 条人话，实际 ${rows.length} 条`)
+    assert.equal(rows[0].text, '吃过饭啦')
+    ok('整块元消息按块丢弃 / 夹带的提醒剥掉')
+  }
 
   // 2. 认不出来源的 staging 挪进 orphan/，不再被反复重试
   //    默认本地会话是收的，这条只在「本地记忆关掉」时才成立，所以先临时关掉。
