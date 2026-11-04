@@ -91,10 +91,13 @@ for (const s of sections) {
 }
 
 // 模拟一条消息进来（session/event：两个参数，session 与 event）
-handlers['session/event']?.[0]?.(
-  { header: { id: realSid } },
-  { type: 'user/message', data: { content: [{ type: 'text', text: '小鱼（123456）：记住，我下周三出差' }] } },
-)
+// 宿主会挨个通知所有监听器；这里也只喂采集那一个会漏（注入先注册）。
+for (const fn of handlers['session/event'] ?? []) {
+  fn(
+    { header: { id: realSid } },
+    { type: 'user/message', data: { content: [{ type: 'text', text: '小鱼（123456）：记住，我下周三出差' }] } },
+  )
+}
 await new Promise((r) => setTimeout(r, 300))
 
 // staging 应该出现这个会话的文件

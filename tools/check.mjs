@@ -48,9 +48,25 @@ if (existsSync(cfg)) {
 line()
 say('【分片】')
 const scopesDir = join(root, 'scopes')
+let dirs = []
 let files = []
+try {
+  dirs = readdirSync(scopesDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .sort()
+} catch { /* 空 */ }
 try { files = readdirSync(scopesDir).filter((n) => n.endsWith('.json')) } catch { /* 空 */ }
-if (!files.length) say('  还没有（等她跟人聊过、蒸馏跑过之后会出现）')
+if (!dirs.length && !files.length) say('  还没有（等她跟人聊过、蒸馏跑过之后会出现）')
+for (const d of dirs) {
+  try {
+    const j = JSON.parse(readFileSync(join(scopesDir, d, 'meta.json'), 'utf8'))
+    let n = 0
+    try { n = readdirSync(join(scopesDir, d, 'memory_full')).filter((x) => x.endsWith('.md')).length } catch { /* 还没写过 */ }
+    say(`  ${j.scope ?? d} · ${n} 条 · 画像：${j.profile?.summary ? '有' : '空'}`)
+  } catch { say(`  ${d} 读取失败`) }
+}
+// 旧版平铺分片，迁移还没跑到的库还能看
 for (const f of files) {
   try {
     const j = JSON.parse(readFileSync(join(scopesDir, f), 'utf8'))

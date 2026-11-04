@@ -53,10 +53,12 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
   两份独立文件，跟 `persona.md` 分家。偏好和教训在记忆**转正之后**自动沉淀（待确认的不进），
   每条带主库指针；一条经验连续两次「按它做还是失败」自动标待复核并退出注入，一次成功就恢复。
   文件可手改、可 git diff，容量到顶先丢最老的非待复核条目。
-- **分片记忆**：`scopes/private-<QQ号>/`、`scopes/group-<群号>/`、`scopes/local-dsh/`；
-  私聊、群、本地会话各记各的。本地会话（桌面 / CLI / Web 直接开的）没有绑定表可查，
-  统一进 `local:dsh` 一个全局分片，不做项目隔离。每个分片都是「主库 + 派生副库」的目录，
-  旧版单文件 JSON 启动时自动迁移
+- **分片记忆**：`scopes/public-web/`（公共池）、`scopes/group-<群号>/`（圈子池）、
+  `scopes/private-<QQ号>/`（私聊池）、`scopes/local-dsh/`。
+  公共池放网上学到的公开内容（B站账本等），群和私聊都能读，只有本机能写；
+  圈子池每个群一份、群之间不互通，私聊可以读圈子池；私聊池每份私聊各记各的，私聊之间不互通。
+  本地会话（桌面 / CLI / Web 直接开的）没有绑定表可查，统一进 `local:dsh` 一个全局分片，不做项目隔离。
+  每个分片都是「主库 + 派生副库」的目录，旧版单文件 JSON 启动时自动迁移
 - **蒸馏**：会话空闲 10 分钟后，从用户消息里提取值得记的事实/偏好/约定
   （默认规则抽取；设置页「大肥鱼记忆 → 模型」填了端点、或配了 `DSH_MEMORY_LLM_*`，就先走一次 LLM，失败自动回退规则）。
   本地会话换一套工程信号词（路径 / 版本 / 「以后都用」/ 约定 / 决定），
@@ -115,7 +117,8 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
     archive/full/            删掉或归档的条目（正文保留，可翻回）
     .rev                     写入版本号（注入层按它判断要不要重画）
   scopes/local-dsh/          本地会话（桌面 / CLI / Web）的全局记忆，结构同上
-  scopes/group-<群号>/       群记忆，结构同上
+  scopes/group-<群号>/       群记忆（圈子池），结构同上
+  scopes/public-web/         公共记忆池：网上学到的公开内容，所有会话可读、只有本机能写，结构同上
 ```
 
 规矩：**先写主库，再写副库**。副库坏了、删了，跑 `node tools/rebuild-index.mjs` 从主库重建；
@@ -150,6 +153,48 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
   高权重条目、本会话已读/已写 id），10 分钟后自动撤掉；不重放历史，不重新注入正文。
 - **并发**：同一进程内所有写入走一把串行队列；CLI（部署、重建、人格、信任）要求 DSH 关闭时跑，
   跨进程不共享同一份库。
+
+## 外部记忆接入
+
+别的插件（B站值班、抓取任务、以后别的东西）想把自己的观察放进记忆库，不用改本插件：
+
+**方式一：投递箱（跨进程/跨 profile，零代码）**
+
+往 `$DSH_HOME/memory-inbox/<来源>.jsonl` 追加行，一行一条：
+
+```json
+{"text":"池塘水温 18 度。","quote":"传感器读数","refs":["pond-3"],"at":"2026-11-03 09:00","kind":"event","conf":0.8}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `text` | 是 | 条目正文 |
+| `quote` | 否 | 原文摘录/为什么记，进 `sourceQuote` |
+| `refs` | 否 | 字符串或数组，进条目的引用 |
+| `at` | 否 | 观测时间，`2026-11-03 09:00` 或 ISO；缺省按入库时间 |
+| `kind` | 否 | `fact` / `pref` / `event` / `relation`，缺省 `fact` |
+| `conf` | 否 | 0.1–1，缺省 0.5 |
+| `source` | 否 | 来源标记，缺省用文件名 |
+
+文件名就是来源，进库后能在审计里按来源查。目录可用 `DSH_MEMORY_INBOX` 改；总开关 `DSH_MEMORY_INBOUND=off`。
+拉，不推：投递方不需要知道本插件存在，写入失败也不影响它；本插件按字节水位取新增行，
+半行等写完，账本被截断/替换时用正文 hash 兜住重复。
+
+**方式二：注册 provider（同进程、自定义解析）**
+
+```js
+import { registerInboundProvider } from 'dsh-whale-memory/inbound'
+
+const off = registerInboundProvider({
+  id: 'my-source',
+  label: '我的账本',
+  files: () => [{ file: '/path/to/ledger.jsonl', token: 'main' }],
+  parse: (row, { toIso }) => ({ text: row.msg, quote: row.note, at: toIso(row.when) }),
+})
+```
+
+其余（水位、去重、半行、落盘、审计）都由引擎处理。完整规格见 `lib/inbound.js` 里
+`registerInboundProvider` 的注释；B站那一路就是现成示例（`lib/inbound-bili.js`）。
 
 ## 数据卫生
 
@@ -252,6 +297,9 @@ $DSH_HOME/dsh-memory/        （可用 DSH_MEMORY_HOME 改到别处）
 - 不建会话、不刷 B 站、不主动说话
 - 来源识别靠桥接绑定表（sessionId → 私聊/群）；表里没有的算本地会话，进 `local:dsh`，
   不解析消息文本
+- 公共池（`public:web`）所有会话可读，写入收口在本机会话：`memory_save(..., namespace="public")`
+  或 B站 inbound；群/私聊只能读，不能改、删、转正公共条目；公共池也不参与遗忘衰减、
+  自动深化和人格蒸馏
 - 本地会话默认进 `local:dsh`；如果 cwd 在一个仓库里（向上找得到 `.git` / `package.json` /
   `AGENTS.md` 等标记），额外挂一个 **project 命名空间**，库放在 `<repo>/.dsh/storages/whale-memory`，
   两个库各有独立的 `memory_index.md` 与 `memory_full/`。检索和注入合并两处，写入仍默认进个人库：

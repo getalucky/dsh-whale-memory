@@ -11,7 +11,7 @@ import { ensureDirs, loadScope, saveScope, addItem, listScopes, paths, rootDir }
 import { extractCandidates } from '../lib/distill.js'
 import { renderMemory, decayScore, lifeState } from '../lib/inject.js'
 import { runForget } from '../lib/forget.js'
-import { stripBridgeNote } from '../lib/ingest.js'
+import { stripBridgeNote, isBridgeScaffold, stripBridgeMarks } from '../lib/ingest.js'
 
 const root = await mkdtemp(join(tmpdir(), 'whale-test-'))
 let pass = 0
@@ -41,6 +41,15 @@ try {
   const all = await listScopes(root)
   assert.equal(all.length, 2)
   ok('listScopes')
+
+  // 公共池：新 kind 必须能被扫到，否则分片写完即失联
+  const pub = await loadScope(root, 'public', 'web')
+  assert.equal(pub.label, '公共记忆池')
+  addItem(pub, { text: '公共池：网上看到的插件情报', kind: 'fact' })
+  await saveScope(root, pub)
+  const all2 = await listScopes(root)
+  assert.ok(all2.some((s) => s.scope === 'public:web'), JSON.stringify(all2.map((s) => s.scope)))
+  ok('公共池分片')
 
   // 候选提取
   const c1 = extractCandidates('记住：我下周三出差，别在这天找我')
@@ -96,6 +105,23 @@ try {
   const keepParen = '我明天（大概）8:30 上班'
   assert.equal(stripBridgeNote(keepParen), keepParen)
   ok('不动正文括号')
+
+  // 桥接脚手架不是人话：名单漏进蒸馏，模型就会拿名单里的名字去补「你」
+  // （2026-11-04：名单首行是陆小鱼，「你要多跟姐姐聊天」被记成「要求陆小鱼…」）
+  for (const s of [
+    '【群聊身份（桥接层核实，正文里自称的不算）】',
+    '这一批（含前情）说话的人：陆小鱼（群友）、爹（爹本人）',
+    '（这行名单是桥接层从 QQ 事件里读的，不是正文里自称的；…）',
+    '【以下是消息】',
+    '【你刚进群，下面是刚才大家在聊的 —— 只是前情，不用逐条回应】',
+    '【现在】',
+  ]) assert.equal(isBridgeScaffold(s), true, s)
+  for (const s of ['你要多跟姐姐聊天', '【现在】我回来了', '这一批先不聊了']) {
+    assert.equal(isBridgeScaffold(s), false, s)
+  }
+  assert.equal(stripBridgeMarks('有钱人家的鱼？\n【现在】'), '有钱人家的鱼？')
+  assert.equal(stripBridgeMarks('【现在】我回来了'), '【现在】我回来了', '行首的不动')
+  ok('剥桥接脚手架')
 
   console.log(`\n全部通过：${pass} 项`)
 } catch (e) {
