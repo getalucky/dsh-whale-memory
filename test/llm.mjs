@@ -24,6 +24,7 @@ const {
 const { fuseRankings } = await import('../lib/recall.js')
 const { ensureDirs, loadScope, paths } = await import('../lib/store.js')
 const { distillSession } = await import('../lib/distill.js')
+const { loadSources, resetSourceCache } = await import('../lib/source.js')
 
 let pass = 0
 const ok = (name) => { pass += 1; console.log('  ok', name) }
@@ -38,6 +39,27 @@ try {
   assert.equal(llmReady(), true)
   assert.equal(embedReady(), true)
   ok('配置齐全才算就绪')
+
+  // 拥有者称呼从桥接配置来；记忆端只读，不另设一份
+  const ownerCfg = join(root, 'qq-bridge-owner.json')
+  await writeFile(ownerCfg, JSON.stringify({
+    拥有者QQ: '42',
+    拥有者称呼: '老板',
+    绑定: [
+      { 类型: '私聊', 号码: '123456789', 会话: 'sess-llm', 称呼: '老爹' },
+      { 类型: '群', 号码: '123456789', 会话: 'sess-group-owner', 称呼: '群里的人' },
+    ],
+  }), 'utf8')
+  const oldCfg = process.env.DSH_QQ_BRIDGE_CONFIG
+  process.env.DSH_QQ_BRIDGE_CONFIG = ownerCfg
+  resetSourceCache()
+  const ownerCfgRead = await loadSources()
+  assert.equal(ownerCfgRead.owner.name, '老板')
+  assert.equal(ownerCfgRead.owner.qq, '42')
+  assert.equal(ownerCfgRead.bySession.get('sess-group-owner').kind, 'group')
+  process.env.DSH_QQ_BRIDGE_CONFIG = oldCfg
+  resetSourceCache()
+  ok('桥接拥有者称呼与身份解析')
 
   // 解析：围栏、坏 kind、空数组、src 越界
   assert.deepEqual(parseCandidates('废话\n```json\n[{"text":"老爹喜欢冰美式","kind":"pref","conf":0.8}]\n```'), [
@@ -77,6 +99,30 @@ try {
   assert.ok(sentPrompt.includes('[0] 2026-10-30T22:00:00'), '输入要带行号和原时间')
   assert.ok(sentPrompt.includes('[1] 2026-10-30T22:05:00'))
   ok('候选带回来源消息下标')
+
+  // 群聊蒸馏：拥有者按 QQ 标记，别人话里的老爹不能被算到拥有者头上；
+  // 改了称呼以后，提示词和标记也要跟着用新称呼。
+  let groupSys = ''
+  let groupUser = ''
+  const groupStub = async (url, init) => {
+    const body = JSON.parse(init.body)
+    groupSys = body.messages[0].content
+    groupUser = body.messages[1].content
+    return jsonRes({
+      choices: [{ message: { content: '[{"text":"陆小鱼称呼自己的主人为老爹","kind":"relation","conf":0.6,"src":1}]' } }],
+    })
+  }
+  const scoped = await distillMessages([
+    { at: '2026-11-07T10:29:00', speaker: '老板', text: '今天加班到十点', owner: true },
+    { at: '2026-11-07T10:30:00', speaker: '陆小鱼', text: '怎么天天有人想来抢老爹', owner: false },
+  ], { fetchImpl: groupStub, group: true, ownerName: '老板' })
+  assert.equal(scoped.length, 1)
+  assert.ok(groupUser.includes('[拥有者] 老板：'), '拥有者那条要带标记：' + groupUser)
+  assert.ok(!groupUser.includes('[拥有者] 陆小鱼'), '别人的发言不该带拥有者标记：' + groupUser)
+  assert.ok(groupSys.includes('「老板」'), '提示词要用配置里的称呼：' + groupSys)
+  assert.ok(groupSys.includes('其他人口中的「老爹」'), '群聊提示词要区分别人家的老爹')
+  assert.ok(groupSys.includes('称呼自己的主人为老爹'), '给模型一个正确转述示例')
+  ok('群聊蒸馏：拥有者标记 + 动态称呼')
 
   const fail = async () => ({ ok: false, json: async () => ({}) })
   assert.equal(await distillMessages([{ at: '', text: 'x' }], { fetchImpl: fail }), null)

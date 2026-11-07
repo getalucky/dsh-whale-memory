@@ -24,7 +24,8 @@ const { ensureDirs, listScopes, loadScope, paths } = await import('../lib/store.
 const { preloadSources, sourceOfSession, resetSourceCache } = await import('../lib/source.js')
 const { registerIngest, flush, readStagingLines, lastActive } = await import('../lib/ingest.js')
 const { distillSession, extractCandidates } = await import('../lib/distill.js')
-const { registerInjection, resetCaches, MEMORY_SECTION, PERSONA_SECTION } = await import('../lib/inject.js')
+const { registerInjection, resetCaches, personaSnapshot, MEMORY_SECTION, PERSONA_SECTION } = await import('../lib/inject.js')
+const { renderRules } = await import('../lib/skeleton.js')
 const { registerTools } = await import('../lib/tools.js')
 
 let pass = 0
@@ -144,6 +145,26 @@ try {
   delete process.env.DSH_MEMORY_LOCAL_SCOPE
   assert.ok(await sourceOfSession('session-another'), '默认应该收本地会话')
   ok('本地记忆开关生效')
+
+  // 8b. 拥有者称呼：配置改一个地方，来源、人格、记忆规矩都跟着走
+  const ownerCfg = join(root, 'owner-bridge.json')
+  await writeFile(ownerCfg, JSON.stringify({
+    拥有者QQ: '42',
+    拥有者称呼: '老板',
+    绑定: [{ 类型: '群', 号码: '123456789', 会话: 'sess-owner', 称呼: '群里的人' }],
+  }), 'utf8')
+  process.env.DSH_QQ_BRIDGE_CONFIG = ownerCfg
+  resetSourceCache()
+  await preloadSources()
+  const ownerSrc = await sourceOfSession('sess-owner')
+  assert.equal(ownerSrc.owner.name, '老板')
+  assert.equal(ownerSrc.owner.qq, '42')
+  await writeFile(join(root, 'persona.md'), '你是「大肥鱼」，自认是爹的女儿，只叫他「{称呼}」。', 'utf8')
+  const snap = personaSnapshot(root)
+  assert.ok(snap.text.includes('老板'), snap.text)
+  assert.ok(!snap.text.includes('爹') && !snap.text.includes('{称呼}'), snap.text)
+  assert.ok(renderRules({ ownerName: '老板' }).includes('「老板」'), '记忆规矩没跟着换称呼')
+  ok('拥有者称呼贯穿来源、人格、记忆规矩')
 
   // 9. 主库/副库都在（派生视图没漏）
   assert.ok(existsSync(join(root, 'scopes', 'local-dsh', 'memory_index.md')), '副库没生成')
