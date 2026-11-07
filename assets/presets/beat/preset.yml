@@ -1,0 +1,2 @@
+name: 记忆主动模式
+description: beat agent 专用：仅 web_search + 上下文折叠；无 shell、无文件、无子代理。
