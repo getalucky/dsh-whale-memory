@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -18,9 +18,20 @@ const root = await mkdtemp(join(tmpdir(), 'whale-settings-'))
 delete process.env.DSH_MEMORY_LLM_BASE
 delete process.env.DSH_MEMORY_LLM_MODEL
 delete process.env.DSH_MEMORY_LLM_KEY
+delete process.env.DSH_MEMORY_SEARCH_BASE
+delete process.env.DSH_MEMORY_SEARCH_MODEL
+delete process.env.DSH_MEMORY_SEARCH_KEY
+// 别读本机真实桥接配置：目标候选测试只关心结构
+const bridgeStub = join(root, 'qq-bridge.json')
+process.env.DSH_QQ_BRIDGE_CONFIG = bridgeStub
+await writeFile(bridgeStub, JSON.stringify({
+  试运行: false,
+  绑定: [{ 类型: '私聊', 号码: '10001', 会话: 'session-owner', 称呼: '主人' }],
+}), 'utf8')
 
 const { loadSettings, saveSettings, maskKey, settingsPath } = await import('../lib/settings.js')
-const { llmReady, probeLlm, setConfigRoot, resetSettingsCache } = await import('../lib/llm.js')
+const { llmReady, searchReady, probeLlm, setConfigRoot, resetSettingsCache } = await import('../lib/llm.js')
+const { ownerTarget } = await import('../lib/beat/delivery.js')
 const { registerWebApi, API_PREFIX } = await import('../lib/webapi.js')
 
 let pass = 0
@@ -103,6 +114,12 @@ try {
         routes.set(path, handler)
         return () => routes.delete(path)
       },
+    },
+    // 宿主会话清单：投递目标不用桥接也能列出本机会话
+    get(name) {
+      if (name === 'sessions') return { list: () => [{ id: 'session-local-1' }] }
+      if (name === 'sessionTitle') return { get: () => ({ title: '本机测试' }) }
+      return undefined
     },
     logger: { info() {} },
   }
@@ -199,6 +216,113 @@ try {
   }
   ok('模型探测：只读、key 沿用、上游失败 502')
 
+  // ---- 8.5 闲聊搜索模型：独立一段，不覆盖蒸馏 ----
+  const searchSaved = await 调('/llm/search', {
+    method: 'POST',
+    body: { base: 'https://search.example/v1/', model: 'net-model', key: 'sk-search-1234' },
+  })
+  assert.equal(searchSaved.statusCode, 200)
+  assert.equal(searchSaved.body.kind, 'search')
+  assert.equal(searchSaved.body.base, 'https://search.example/v1')
+  assert.equal(searchSaved.body.ready, true)
+  assert.equal(loadSettings(root).search.model, 'net-model')
+  assert.equal(loadSettings(root).llm.base, 'https://probe.example/v1', '不能把蒸馏段覆盖掉')
+  assert.equal(searchReady(), true)
+
+  const searchGot = await 调('/llm/search')
+  assert.equal(searchGot.statusCode, 200)
+  assert.ok(!JSON.stringify(searchGot.body).includes('sk-search-1234'), 'GET 不能回完整 key')
+
+  const seenSearch = []
+  globalThis.fetch = async (url, opts = {}) => {
+    seenSearch.push({ url, method: opts.method, auth: opts.headers?.authorization })
+    if (url.endsWith('/models')) return jsonRes({ data: [{ id: 'net-model' }] })
+    return jsonRes({ choices: [{ message: { content: 'ok' } }] })
+  }
+  try {
+    const st = await 调('/llm/search/test', { method: 'POST' })
+    assert.equal(st.body.ok, true, JSON.stringify(st.body))
+    const sm = await 调('/llm/search/models', { method: 'POST', body: { base: '', key: '' } })
+    assert.equal(sm.statusCode, 200)
+    assert.equal(sm.body.counts.usable, 1)
+    const listCall = seenSearch.find((x) => x.url.endsWith('/models'))
+    assert.ok(listCall, '要真的拉一次 /models')
+    assert.equal(listCall.url, 'https://search.example/v1/models')
+    assert.equal(listCall.auth, 'Bearer sk-search-1234')
+    assert.equal(loadSettings(root).llm.model, 'old', '探测搜索模型不能改蒸馏配置')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  ok('闲聊搜索模型独立保存，可探测/测试，不串蒸馏')
+
+  // ---- 8.6 投递目标绑定 ----
+  assert.equal(ownerTarget({}).ok, false, '没绑定就不投')
+  assert.equal(ownerTarget({}).why, 'no-target')
+  assert.equal(ownerTarget({ targetSessionId: 'session-pinned' }).sessionId, 'session-pinned', '绑定优先')
+  const targetSaved = await 调('/beat/config', {
+    method: 'POST',
+    body: { targetSessionId: 'session-pinned', targetSessionLabel: '私聊 · 测试', targetSessionKind: 'private' },
+  })
+  assert.equal(targetSaved.statusCode, 200)
+  assert.equal(targetSaved.body.config.targetSessionId, 'session-pinned')
+  assert.equal(targetSaved.body.target.pinned, true)
+  assert.equal(targetSaved.body.target.sessionId, 'session-pinned')
+  assert.equal(targetSaved.body.target.label, '私聊 · 测试')
+
+  const targets = await 调('/beat/targets')
+  assert.equal(targets.statusCode, 200)
+  assert.equal(targets.body.ok, true)
+  assert.ok(Array.isArray(targets.body.items))
+  assert.ok(targets.body.items.some((x) => x.id === 'session-owner'), '桥接绑定表要出现在候选里')
+  assert.ok(targets.body.items.some((x) => x.id === 'session-local-1'), '宿主里的全部会话都要能选')
+  assert.ok(targets.body.items.some((x) => x.label === '本机 · 本机测试'), '有标题就用标题')
+  assert.equal(targets.body.current.sessionId, 'session-pinned')
+
+  const targetCleared = await 调('/beat/config', { method: 'POST', body: { targetSessionId: '' } })
+  assert.equal(targetCleared.body.config.targetSessionId, '')
+  assert.equal(targetCleared.body.target.pinned, false)
+  assert.equal(targetCleared.body.target.sessionId, '', '清空后不再回退桥接')
+  ok('主动聊天会话可绑定、可清空，不再依赖桥接默认')
+
+  // ---- 9. 主动行为层设置 ----
+  const beat0 = await 调('/beat')
+  assert.equal(beat0.statusCode, 200)
+  assert.equal(beat0.body.ok, true)
+  assert.ok(Array.isArray(beat0.body.config.windows), '默认配置要带 windows')
+
+  const beatSaved = await 调('/beat/config', {
+    method: 'POST',
+    body: {
+      dryRun: false,
+      windows: '11:00-15:00, 17:00-21:00',
+      quietHours: '01:00-08:00',
+      minIntervalHours: '5',
+      interests: '城市生活、独立游戏',
+      maxWanderPerDay: '3',
+    },
+  })
+  assert.equal(beatSaved.statusCode, 200)
+  assert.equal(beatSaved.body.config.dryRun, false)
+  assert.equal(beatSaved.body.config.windows.length, 2)
+  assert.equal(beatSaved.body.config.quietHours.start, '01:00')
+  assert.equal(beatSaved.body.config.minIntervalHours, 5)
+  assert.deepEqual(beatSaved.body.config.interests, ['城市生活', '独立游戏'])
+  assert.equal(beatSaved.body.config.maxWanderPerDay, 3)
+
+  const badWindow = await 调('/beat/config', { method: 'POST', body: { windows: '11点-15点' } })
+  assert.equal(badWindow.statusCode, 400)
+  assert.equal(badWindow.body.ok, false)
+  ok('beat 设置：时间窗 / 兴趣 / 数字都归一化')
+
+  const focused = await 调('/beat/focus', { method: 'POST', body: { minutes: 30 } })
+  assert.equal(focused.body.ok, true)
+  assert.ok(Date.parse(focused.body.focusUntil) > Date.now())
+  const beatFocused = await 调('/beat')
+  assert.equal(beatFocused.body.state.focusUntil, focused.body.focusUntil, '专注时间不能被 loadState 丢掉')
+  const unfocused = await 调('/beat/focus', { method: 'POST', body: { off: true } })
+  assert.equal(unfocused.body.focusUntil, '')
+  ok('beat 专注模式可开可关，且能落盘读回')
+
   console.log(`\n全部通过：${pass} 项`)
 } catch (e) {
   console.error('\n失败：', e)
@@ -207,5 +331,9 @@ try {
   delete process.env.DSH_MEMORY_LLM_BASE
   delete process.env.DSH_MEMORY_LLM_MODEL
   delete process.env.DSH_MEMORY_LLM_KEY
+  delete process.env.DSH_MEMORY_SEARCH_BASE
+  delete process.env.DSH_MEMORY_SEARCH_MODEL
+  delete process.env.DSH_MEMORY_SEARCH_KEY
+  delete process.env.DSH_QQ_BRIDGE_CONFIG
   await rm(root, { recursive: true, force: true }).catch(() => {})
 }

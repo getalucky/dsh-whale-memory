@@ -6,6 +6,13 @@
 
 ## 安装
 
+**获取代码**：没有发布到 npm，直接从 GitHub 克隆：
+
+```bash
+git clone https://github.com/getalucky/dsh-whale-memory.git
+cd dsh-whale-memory
+```
+
 **前置**
 - DSH 桌面版，profile 目录是 `$DSH_HOME/profiles/desktop`（`DSH_HOME` 一般指 `~/.dsh` 或你自定义的安装目录）
 - Node ≥ 20，profile 里带 pnpm（DSH 自带在 `$DSH_HOME/dsh-runtimes/`）
@@ -60,7 +67,7 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
   本地会话（桌面 / CLI / Web 直接开的）没有绑定表可查，统一进 `local:dsh` 一个全局分片，不做项目隔离。
   每个分片都是「主库 + 派生副库」的目录，旧版单文件 JSON 启动时自动迁移
 - **蒸馏**：会话空闲 10 分钟后，从用户消息里提取值得记的事实/偏好/约定
-  （默认规则抽取；设置页「大肥鱼记忆 → 模型」填了端点、或配了 `DSH_MEMORY_LLM_*`，就先走一次 LLM，失败自动回退规则）。
+  （默认规则抽取；设置页「大肥鱼记忆 → 模型 → 蒸馏」填了端点、或配了 `DSH_MEMORY_LLM_*`，就先走一次 LLM，失败自动回退规则）。
   本地会话换一套工程信号词（路径 / 版本 / 「以后都用」/ 约定 / 决定），
   只记能迁移的结论，不把代码和工具输出当记忆
 - **降维**：每条记忆落盘时生成摘要、受控标签、上级标签、时间线、权重（`lib/enrich.js` + `lib/taxonomy.js`），
@@ -97,7 +104,7 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
   先看拒绝率）/ `off`（只记录不拦）；运行页会给出 warn / blocked 计数
 - **L3 图谱**：把记忆拆成「实体 —关系→ 实体」，落 `graph/nodes.jsonl` + `graph/edges.jsonl`；
   目前只用于界面展示，不再塞进 system prompt（注入只留规矩段 + 骨架）
-- **界面**：DSH 设置 → 「大肥鱼记忆」，五个页签（总览 / 记忆 / 图谱 / 审计 / 运行）；运行页看人格预算、信任状态、每分片容量、最近检索与跳过原因；记忆页可以删单条，待确认的一栏能点「确认」转正
+- **界面**：DSH 设置 → 「大肥鱼记忆」，两级导航。顶层是总览 / 记忆 / 主动 / 模型；总览里分「概览 / 运行」，记忆里分「分片 / 图谱 / 审计」，主动里分「状态 / 素材 / 设置 / 维护」，模型里分「蒸馏 / 找素材」。运行页看人格预算、信任状态、每分片容量、最近检索与跳过原因；记忆页可以删单条，待确认的一栏能点「确认」转正
 
 ## 数据长什么样
 
@@ -196,6 +203,11 @@ const off = registerInboundProvider({
 其余（水位、去重、半行、落盘、审计）都由引擎处理。完整规格见 `lib/inbound.js` 里
 `registerInboundProvider` 的注释；B站那一路就是现成示例（`lib/inbound-bili.js`）。
 
+B站除了追加式账本 `memory.jsonl`，还会同步 `bili-duty/diary/<日期>.md`：一天一篇、当天
+覆盖写，所以不按行读，而是按日期 upsert 成一条 `event`（`B站值班日记 YYYY-MM-DD`）——
+当天改写只更新同一条正文，不会攒出一串半成品。两路都归 `DSH_MEMORY_BILI_SYNC` 管，
+数据目录认 `BILI_DUTY_HOME`，缺省 `$DSH_HOME/bili-duty`。
+
 ## 数据卫生
 
 - **来源判定**：每条消息落盘前 `await sourceOfSession(sid)`，按 `qq-bridge-config.json`
@@ -282,11 +294,15 @@ $DSH_HOME/dsh-memory/        （可用 DSH_MEMORY_HOME 改到别处）
 - `DSH_MEMORY_LOCAL_SCOPE` — `on`（默认，本地会话也记）/ `off`（退回只收 QQ 桥接）
 - `DSH_MEMORY_PROJECT_SCOPE` — `on`（默认，仓库里的本地会话可挂 project 命名空间）/ `off`（只有个人库）
 - `DSH_MEMORY_GATE` — confirm 闸门灰度：`enforce`（默认）/ `warn`（放行但留记号）/ `off`（不拦）
+- `DSH_MEMORY_BEAT` — 主动行为层总开关：`off` 一键停（不看 config，也不起定时器）
 - `DSH_QQ_BRIDGE_CONFIG` — 桥接配置路径（默认 `$DSH_HOME/qq-bridge-config.json`）
 - `DSH_MEMORY_LLM_BASE` / `DSH_MEMORY_LLM_KEY` / `DSH_MEMORY_LLM_MODEL` — 可选蒸馏端点
-  （OpenAI 兼容，`BASE` 写到 `/v1`；不配就纯规则）。设置页「模型」里填的优先于这里，
+  （OpenAI 兼容，`BASE` 写到 `/v1`；不配就纯规则）。设置页「模型 → 蒸馏」里填的优先于这里，
   key 落盘在 `<库>/settings.json`（界面只回显尾巴）；不确定模型名就点「探测可用模型」，
   会拉 `/models` 再逐个实测，能用的直接点选（探测不落盘，但会消耗少量额度）
+- `DSH_MEMORY_SEARCH_BASE` / `DSH_MEMORY_SEARCH_KEY` / `DSH_MEMORY_SEARCH_MODEL` — 可选的直连搜索模型
+  （要自带联网能力）。设置页「模型 → 找素材」里选「直连搜索模型」才走这条；默认是「闲逛 agent」
+  （宿主里带 `web_search` 多轮搜）。直连那条同样支持测试连通和探测模型，保存后下一跳闲逛生效
 - `DSH_MEMORY_EMBED_BASE` / `DSH_MEMORY_EMBED_KEY` / `DSH_MEMORY_EMBED_MODEL` — 可选向量端点
   （Ollama 填 `http://127.0.0.1:11434/v1` + `bge-m3`；不配就纯词法）
 - `DSH_MEMORY_REVIEW_BASE` / `DSH_MEMORY_REVIEW_KEY` / `DSH_MEMORY_REVIEW_MODEL` — 可选人格审查模型；
@@ -294,12 +310,19 @@ $DSH_HOME/dsh-memory/        （可用 DSH_MEMORY_HOME 改到别处）
 
 ## 边界
 
-- 不建会话、不刷 B 站、不主动说话
+- 默认不主动说话；只有显式打开 `beat/config.json` 的 `enabled` 后，才会在允许的时间窗里
+  给绑定会话投递素材。目标只认设置页「主动 → 配置 → 投递目标」里显式绑定的会话，候选是宿主里的
+  全部会话（QQ 会话只是打标签，不改桥接配置）；不绑就不投。`DSH_MEMORY_BEAT=off` 一键停。
+- 不刷 B 站、不建普通会话；beat 的闲逛用一条专用会话，7 天轮换并释放旧的。
 - 来源识别靠桥接绑定表（sessionId → 私聊/群）；表里没有的算本地会话，进 `local:dsh`，
   不解析消息文本
 - 公共池（`public:web`）所有会话可读，写入收口在本机会话：`memory_save(..., namespace="public")`
-  或 B站 inbound；群/私聊只能读，不能改、删、转正公共条目；公共池也不参与遗忘衰减、
-  自动深化和人格蒸馏
+  或 B站 inbound；群/私聊只能读，不能改、删、转正公共条目。公共池按更慢的节奏衰减
+  （半衰 90 天、180 天归档），但不自动深化、不参与人格蒸馏
+- 知识库 = 公共池里钉住的条目（`pin` / `kind="knowledge"`）：不随时间衰减、不归档，
+  也不被容量淘汰。本机写入时按原话信号（「重要 / 收藏 / 知识库 / 长期」）、反复出现、
+  反复被检索自动钉住；公共池最多钉 50 条，超了先松最久没用的。查知识库用
+  `search_memory(pinned=true)`，手动增减用 `memory_pin`
 - 本地会话默认进 `local:dsh`；如果 cwd 在一个仓库里（向上找得到 `.git` / `package.json` /
   `AGENTS.md` 等标记），额外挂一个 **project 命名空间**，库放在 `<repo>/.dsh/storages/whale-memory`，
   两个库各有独立的 `memory_index.md` 与 `memory_full/`。检索和注入合并两处，写入仍默认进个人库：

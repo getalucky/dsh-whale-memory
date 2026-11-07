@@ -76,15 +76,18 @@ t('factory 能物化', () => {
 
 t('apply 会注册设置页', () => {
   const calls = []
+  let Comp = null
   const ctx = {
     get: (n) => (n === 'slots' ? {
       inject: (slot, fn) => { calls.push(slot); fn() },
-      register: (meta, Comp) => { calls.push(meta.id); ok(typeof Comp === 'function', '组件不是函数'); return () => {} },
+      register: (meta, C) => { calls.push(meta.id); Comp = C; ok(typeof C === 'function', '组件不是函数'); return () => {} },
     } : undefined),
   }
   exportsObj.apply(ctx)
   ok(calls.includes('settings.section'), '没往 settings.section 注册')
   ok(calls.includes('whale-memory'), '注册的 id 不对：' + calls.join(','))
+  const tree = Comp()
+  ok(tree && tree.type === 'div', 'Section 没生成元素树')
 })
 
 t('没 slots 服务时安静退出', () => {

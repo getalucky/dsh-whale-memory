@@ -2,8 +2,9 @@
  * inbound.mjs —— B站账本单向入库
  * 跑法：node test/inbound.mjs
  *
- * 验的是：账本新增行 → local:dsh 条目；水位/正文 hash 两道幂等；
- * 半行不入库；账本被截断时不重复入库；开关能关掉。
+ * 验的是：账本新增行 → public:web 条目；水位/正文 hash 两道幂等；
+ * 半行不入库；账本被截断时不重复入库；日记按天 upsert（当天改写不新开条目）；
+ * 开关能关掉。
  */
 import assert from 'node:assert'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -147,7 +148,55 @@ try {
   assert.ok(!listInboundProviders().some((p) => p.id === 'custom-test'))
   ok('provider 注册/取数/注销')
 
-  // 11. 总开关：别的 provider 照停
+  // 11. 值班日记：一天一篇；当天覆盖写只更新同一条，不攒半成品
+  const diaryHome = await mkdtemp(join(tmpdir(), 'whale-diary-'))
+  process.env.BILI_DUTY_HOME = diaryHome
+  const diaryFolder = join(diaryHome, 'diary')
+  await mkdir(diaryFolder, { recursive: true })
+  const { syncBiliDiaries } = await import('../lib/inbound-bili.js')
+  const d1 = join(diaryFolder, '2026-11-05.md')
+  await writeFile(d1, '# 2026-11-05 值班日记\n\n今天看了三条，最有意思的是记忆主干。\n', 'utf8')
+
+  const dg1 = await syncBiliDiaries(root, {})
+  assert.equal(dg1.added, 1, JSON.stringify(dg1))
+  sc = await loadScope(root, 'public', 'web')
+  let diary = sc.items.find((x) => (x.refs || []).includes('B站值班日记 2026-11-05'))
+  assert.ok(diary, '日记没入库')
+  assert.equal(diary.kind, 'event')
+  assert.equal(diary.source, 'bili-diary')
+  assert.ok(diary.text.startsWith('值班日记 2026-11-05：今天看了三条'), diary.text)
+  assert.ok(diary.observedAt.startsWith('2026-11-05'), diary.observedAt)
+  ok('日记按天入库，标题不重复进正文')
+
+  // 同一天改写：更新同一条，条数不变
+  await writeFile(d1, '# 2026-11-05 值班日记\n\n今天看了三条，最有意思的是记忆主干和日记同步。\n', 'utf8')
+  const dg2 = await syncBiliDiaries(root, {})
+  assert.equal(dg2.added, 0)
+  assert.equal(dg2.updated, 1, JSON.stringify(dg2))
+  sc = await loadScope(root, 'public', 'web')
+  const sameDay = sc.items.filter((x) => (x.refs || []).includes('B站值班日记 2026-11-05'))
+  assert.equal(sameDay.length, 1, '同一天被写成了多条')
+  assert.ok(sameDay[0].text.includes('日记同步'), '改写没更新正文')
+  ok('当天覆盖写走 upsert，不重复')
+
+  // 新的一天 + 引擎调度（provider 已注册）
+  await writeFile(join(diaryFolder, '2026-11-06.md'), '# 2026-11-06 值班日记\n\n今天跑了六轮。\n', 'utf8')
+  const dg3 = await syncInbound(root, { id: 'bili-diary' })
+  assert.equal(dg3.added, 1, JSON.stringify(dg3))
+  const dg4 = await syncInbound(root, { id: 'bili-diary' })
+  assert.equal(dg4.added, 0)
+  sc = await loadScope(root, 'public', 'web')
+  assert.equal(sc.items.filter((x) => (x.refs || []).includes('B站值班日记 2026-11-06')).length, 1)
+  ok('新的一天入库；走引擎调度不重复')
+
+  // 没有日记目录：安静跳过
+  process.env.BILI_DUTY_HOME = join(root, 'no-diary-home')
+  const dg5 = await syncInbound(root, { id: 'bili-diary' })
+  assert.equal(dg5.providers[0].skipped, 'no-diary')
+  await rm(diaryHome, { recursive: true, force: true }).catch(() => {})
+  ok('没有日记目录不报错')
+
+  // 12. 总开关：别的 provider 照停
   process.env.DSH_MEMORY_INBOUND = 'off'
   await writeFile(drop, JSON.stringify({ text: '关掉时不该进' }) + '\n', 'utf8')
   const r11 = await syncInbound(root, {})

@@ -149,7 +149,7 @@ t('保存后能读回', () => { eq(g1.nodes.length, g0.nodes.length); eq(g1.edge
 const routes = new Map()
 const fakeCtx = { webServer: { register({ path, handler }) { routes.set(path, handler); return () => routes.delete(path) } } }
 const api = registerWebApi(fakeCtx, { root, log: () => {}, version: '0.2.0' })
-t('注册了 11 条路由', () => eq(routes.size, 11))
+t('注册了 24 条路由', () => eq(routes.size, 24))
 
 const call = (p) => new Promise((resolve) => {
   const chunks = []
@@ -167,6 +167,12 @@ const obs = await call('/obs')
 t(' /obs 返回人格/信任/分片', () => { eq(obs.ok, true); ok(obs.persona && obs.trust, '缺 persona/trust'); ok(Array.isArray(obs.vault), 'vault 不是数组') })
 const refresh = await call('/refresh')
 t('/refresh 能重建', () => { eq(refresh.ok, true) })
+const diary = await call('/diary')
+t('/diary 返回配置与列表', () => {
+  eq(diary.ok, true)
+  ok(Array.isArray(diary.days), 'days 不是数组')
+  ok(diary.config && Number.isFinite(Number(diary.config.hour)), '缺 config')
+})
 
 api.dispose()
 t('dispose 后路由清空', () => eq(routes.size, 0))
