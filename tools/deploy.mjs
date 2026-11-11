@@ -27,6 +27,8 @@ import {
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { writeBuildInfo } from './build-info.mjs'
+
 const 根 = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DSH家 = process.env.DSH_HOME
 if (!DSH家) {
@@ -78,6 +80,10 @@ const 临时 = join(根, '.pack')
 rmSync(临时, { recursive: true, force: true })
 mkdirSync(临时, { recursive: true })
 
+// 先写构建指纹再打包：包里的 lib/build-info.json 就是这一次 deploy 的来源
+const 构建 = writeBuildInfo(根)
+console.log(`\n[0/4] 构建指纹 · v${构建.version}${构建.commit ? `+${构建.commit.slice(0, 7)}` : ''}${构建.dirty ? '（工作区有未提交改动）' : ''}`)
+
 console.log('\n[1/4] 打包');
 跑npm(['pack', '--pack-destination', 临时], { cwd: 根 })
 const 打出来的 = readdirSync(临时).find((名) => 名.endsWith('.tgz'))
@@ -127,6 +133,16 @@ if (!existsSync(装机client)) {
 if (摘要(装机client) !== 摘要(join(根, 'lib', 'client.js'))) {
   console.error('装机的 client.js 和工作区不一致，先别开 DSH。')
   process.exit(1)
+}
+try {
+  const 工作区指纹 = JSON.parse(readFileSync(join(根, 'lib', 'build-info.json'), 'utf8'))
+  const 装机指纹 = JSON.parse(readFileSync(join(装机, 'lib', 'build-info.json'), 'utf8'))
+  if (工作区指纹.commit !== 装机指纹.commit || 工作区指纹.version !== 装机指纹.version) {
+    console.error('装机的 build-info.json 和打包时不一致，版本标识会骗人，先别开 DSH。')
+    process.exit(1)
+  }
+} catch {
+  console.error('[警告] 装机的 build-info.json 缺失或读不了：界面会退化成纯版本号。')
 }
 跑(process.execPath, [join(根, 'tools', 'verify-client.mjs')], { cwd: 根 })
 

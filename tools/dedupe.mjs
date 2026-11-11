@@ -1,62 +1,44 @@
+#!/usr/bin/env node
 /**
- * dedupe.mjs —— 合并历史里已经写进去的重复记忆
- * 跑法：node tools/dedupe.mjs
+ * dedupe.mjs —— 手动扫一遍「同一件事存了两条」的旧重复。
  *
- * 规则：bigram 相似度 ≥ 0.72 的合并到最早那条，
- * 保留更长的说法，命中数相加，置信度取高。
+ * 默认只预演，不改库；加 --apply 才真的合并（source 标 superseded，主库正文不删）。
+ * 判据和深化一致：同类型、数字签名一致、共享 ≥10 个内容 bigram。
+ * 这个工具只做合并，不做容量归档。
+ *
+ *   node tools/dedupe.mjs
+ *   node tools/dedupe.mjs --apply
+ *   node tools/dedupe.mjs --scope local:dsh
  */
-const root = process.env.DSH_MEMORY_HOME
-if (!root) {
-  console.error('需要 DSH_MEMORY_HOME 环境变量')
-  process.exit(2)
-}
-process.env.DSH_MEMORY_HOME = root
+import { rootDir, ensureDirs, listScopes, saveScope, auditWrite } from '../lib/store.js'
+import { planDeepen, applyDeepen } from '../lib/deepen.js'
 
-const { listScopes, saveScope, findSimilarItem, auditWrite } = await import('../lib/store.js')
+const root = rootDir()
+await ensureDirs(root)
+const apply = process.argv.includes('--apply')
+const scopeArg = (() => {
+  const i = process.argv.indexOf('--scope')
+  return i >= 0 ? String(process.argv[i + 1] || '').trim() : ''
+})()
 
-const scopes = await listScopes(root)
-let totalMerged = 0
-
-for (const sc of scopes) {
-  const items = sc.items.filter((x) => x.state !== 'archived')
-  const keep = []
-  let merged = 0
-  const log = []
-
-  for (const it of items) {
-    const found = findSimilarItem(keep, it.text)
-    const hit = found?.item ?? null
-    if (hit) {
-      hit.hits += (it.hits ?? 0) + 1
-      hit.merged = (hit.merged ?? 0) + 1 + (it.merged ?? 0)
-      if (it.conf > (hit.conf ?? 0)) hit.conf = it.conf
-      if ((it.lastHit ?? '') > (hit.lastHit ?? '')) hit.lastHit = it.lastHit
-      if (it.text.length > hit.text.length) {
-        log.push(`  「${hit.text}」 → 「${it.text}」`)
-        hit.text = it.text
-      } else {
-        log.push(`  合并：「${it.text}」`)
-      }
-      merged += 1
-    } else {
-      keep.push({ ...it })
-    }
+let total = 0
+for (const scope of await listScopes(root)) {
+  if (scopeArg && scope.scope !== scopeArg) continue
+  const plan = planDeepen(scope, { indexBytes: 0 })
+  const groups = plan.merges || []
+  if (!groups.length) continue
+  total += groups.length
+  console.log(`\n${scope.scope} · ${groups.length} 组重复`)
+  for (const g of groups) {
+    console.log(`  - ${g.items.map((x) => `${x.id}「${String(x.text || '').slice(0, 60)}」`).join('  ×  ')}`)
   }
-
-  if (merged) {
-    sc.items = [...keep, ...sc.items.filter((x) => x.state === 'archived')]
-    await saveScope(root, sc)
-    await auditWrite(root, { kind: 'dedupe', scope: sc.scope, merged })
-    console.log(`${sc.scope}：合并 ${merged} 条`)
-    for (const l of log) console.log(l)
-    totalMerged += merged
-  } else {
-    console.log(`${sc.scope}：无重复`)
+  if (apply) {
+    const out = applyDeepen(scope, { merges: groups, archive: [] })
+    await saveScope(root, scope)
+    await auditWrite(root, { kind: 'dedupe', scope: scope.scope, merged: out.merged }).catch(() => {})
+    console.log(`  已合并 ${out.merged} 条`)
   }
 }
-
-console.log(`\n共合并 ${totalMerged} 条`)
-for (const sc of await listScopes(root)) {
-  console.log(`${sc.scope} · ${sc.items.length} 条`)
-  for (const it of sc.items) console.log(`  [${it.kind}] ${it.text}  (hits=${it.hits})`)
-}
+console.log(apply
+  ? `\n完成：${total} 组重复已合并。`
+  : `\n预演：${total} 组重复。加 --apply 才写入；合并前建议先备份 ${root}/scopes。`)

@@ -115,6 +115,23 @@ try {
   assert.equal(saved.sourceQuote, '记住，我这边一律用深色主题')
   ok('memory_save：带原话写入，source_quote 落到主库')
 
+  // 显式合并：字面完全不像，但模型查重后指定了 merge_into，也必须并进旧条目
+  const merged = await tools.get('memory_save').execute({
+    text: '用户在设置页也要求一律用深色主题，避免亮色闪眼',
+    kind: 'pref',
+    source_quote: '记住，我这边一律用深色主题',
+    scene: '当时在调设置页的主题选项',
+    merge_into: good.id,
+  })
+  assert.ok(merged.ok, JSON.stringify(merged))
+  assert.equal(merged.id, good.id, 'merge_into 应该并进旧条目，不是新建')
+  const afterMerge = await h.scopeOf(c.id)
+  assert.equal(afterMerge.items.filter((x) => x.text.includes('深色主题')).length, 1, '不能存成两条')
+  const one = afterMerge.items.find((x) => x.id === good.id)
+  assert.ok(one.text.includes('避免亮色闪眼'), one.text)
+  assert.ok(one.scene.includes('设置页'), one.scene)
+  ok('memory_save：merge_into 按语义合并，不新建重复条目')
+
   console.log(`\n${pass} 通过 · 0 失败`)
 } finally {
   await h.dispose()

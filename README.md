@@ -42,6 +42,18 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
 
 **装完先改人格**：仓库里的 `persona.md` 只是新装时的种子，`$DSH_HOME/dsh-memory/persona.md` 才是运行时那份（库里有就不覆盖）。把里面「拥有者是 QQ 123456789」换成你自己的号，否则它认不出谁是主人。不想要鲸鱼人设，整份换成你自己写的也行——`<!-- PERSONA:CORE:START -->` 和 `<!-- PERSONA:EVOLVABLE:START -->` 两个区块要留着，探针和自动迭代都靠它们定位。
 
+## 版本约定
+
+- 版本号只有一个来源：`package.json`。日志、界面、启动横幅都读它，不再有写死的常量。
+- `node tools/deploy.mjs` 打包前会写 `lib/build-info.json`（version / commit / branch / builtAt / dirty），
+  面板和启动日志显示成 `v0.18.0+4e21dc1`；带 `.dirty` 表示打包时工作区还有没提交的改动。
+- 这个文件不进 git，开发目录里没有生成过就只显示纯版本号。
+- 如果 `build-info.json` 里的版本和 `package.json` 对不上（改了版本但忘了重新 deploy），
+  面板会自动隐去 commit，只显示版本号，避免旧构建冒充新构建。
+- 手动生成/刷新：`node tools/build-info.mjs`。
+- 语义：0.x 阶段接口还会动；功能向后兼容地增加时升次版本号，只修 bug 升补丁号，
+  破坏兼容才升主版本。每次发布的变更记在 `CHANGELOG.md`。
+
 ## 它做什么
 
 - **固定人格**：`persona.md` 挂进所有会话的 system prompt（默认全局，含人格与纪律）；注入前去掉区块标记，预算 ≤1200 tok。
@@ -87,18 +99,34 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
   `node tools/metrics.mjs [天数]` 从真实账本算主动读取有效率、无效读取 token、
   主动写入准确率（24h 后仍保留）和重复写入率，运行页同一口径
 - **两级漏斗**：`search_memory` 语义匹配副库摘要，同时把内存里的正文补进召回——摘要常把具体名词、梗压成抽象句，
-  只搜副库会漏（语义 0.35 / 标签 0.15 / 权重 0.15 / 新近 0.15 / 置信 0.10，整句/整词在原文出现的再 +0.12）；
-  命中后做一跳标签展开（上下位，0.7 衰减）；无关查询返回空，不拿最近的记忆硬凑。
-  正文命中但摘要没写到的，结果带一小段「正文：……」上下文。
-- **读侧工具**：`search_memory`（返回 id/摘要/标签/权重/命中片段）/ `read_memory`（按 section 读主库，单次 ≤800 tok）
-  / `profile_show`；旧的 `memory_recall` 作为别名保留
-- **写侧工具**：`memory_save`（必须带 `source_quote` 用户原话）/ `memory_pending`（看待确认）/ `memory_confirm`（点头转正）
-  / `memory_correct` / `memory_update`（只改话题进展、承诺到期，不新建）/ `memory_forget` / `memory_revive`（从归档或过期里找回）
+  只搜副库会漏；召回后按「查询内容词的 IDF 覆盖率」重排（权重/新近度只当同相关的次序），
+  只撞一个泛词的条目不再靠高权重挤进结果；命中后做一跳标签展开（上下位，0.7 衰减）；
+  无关查询返回空，不拿最近的记忆硬凑。正文命中但摘要没写到的，结果带一小段「正文：……」上下文。
+- **读侧工具**：`search_memory`（返回 id/摘要/场景/标签/权重/命中片段）/ `read_memory`（按 section 读主库，单次 ≤800 tok；
+  默认带场景和原话，`section:"原文"` 按写入时的会话坐标翻回原始对话，取前后几句）/ `profile_show`；旧的 `memory_recall` 作为别名保留
+- **写侧工具**：`memory_save`（必须带 `source_quote` 用户原话和 `scene` 当时场景；写前先 `search_memory`，
+  找到同一条就传 `merge_into=id` 并进旧条目，不新建）/ `memory_pending`（看待确认）/ `memory_confirm`（点头转正）
+  / `memory_correct` / `memory_merge`（两条旧重复并成一条，source 标已取代）/ `memory_update`（只改话题进展、承诺到期，不新建）/ `memory_forget` / `memory_revive`（从归档或过期里找回）
   / `memory_experience`（看 / 增经验与画像，`ok` / `fail` 记一次用后结果，连续失败两次自动待复核）
-- **三类特殊记忆**：`lesson` 教训（必填 `trigger`「当……时」+ `anti_pattern`，写不出来就不是教训）、
+- **重复合并**：蒸馏时把相关旧记忆一起给模型，模型认为同一件事就返回 `merge_id`；同批里共享 ≥6 个内容 bigram 的候选
+  也会再收一次口。合并保留旧正文（`history`）、旧原话（`quote_history`）和两段场景，不物理删除。
+  旧库已有重复用 `npm run dedupe` 预演，`npm run dedupe -- --apply` 合并（同类型、数字签名一致、共享 ≥10 个内容 bigram）。
+- **四类特殊记忆**：`lesson` 教训（必填 `trigger`「当……时」+ `anti_pattern`，写不出来就不是教训）、
   `topic` 进行中话题（必填 `goal`，进展变化用 `memory_update` 改，不新建条目）、
-  `commitment` 承诺（必填 `due` / `to_whom`，日期或「下次提到 X 时」）。
+  `commitment` 承诺（必填 `due` / `to_whom`，日期或「下次提到 X 时」）、
+  `skill` 技能（必填 `trigger`「当……时」+ 3–8 步 `steps` + `verify`，存的是可复用流程）。
+  技能默认**不进常驻骨架**，只在 `search_memory("技能")` 里露摘要和触发条件，要步骤再 `read_memory(id)`；
+  每分片最多 30 条，超了归档用得最少的。`memory_update` 可改流程，或 `outcome:"ok"/"fail"` 记一次执行结果，
+  连续失败两次标「待复核」，成功一次清零。
   会话首轮的骨架里会提醒「逾期/一周内到期的承诺 + 进行中话题 + 最重的一条教训」，零 LLM、纯日期比较，不逐轮扫
+- **历史补录**：`node tools/import-history.mjs` 扫 `$DSH_HOME/sessions/`，按同一套采集/蒸馏过滤
+  把旧会话补进记忆库。默认预演、只走规则、丢掉过期计划；只导当前绑定表能确定分片的 QQ 会话，
+  未绑定的必须 `--map` 显式指定；每次导入带 `source=import:<run>` 和清单，可整批回滚
+- **原文追溯**：蒸馏/导入/`memory_save` 写条目时只带坐标 `{sessionId,msgIndex,hash}`，不复制原文。
+  需要核对时用 `read_memory(section:"原文")`，按原话指纹去 `$DSH_HOME/sessions/` 找会话文件
+  （`.jsonl` / `.jsonl.zstd`），返回命中句和前后几句；读出来先重新打码。会话被 DSH 清理后
+  退回写入时保存的 `source_quote`。可选缓存：`DSH_MEMORY_ORIGIN_CACHE=1` 打开，默认留 30 天、
+  总量 32MB，`DSH_MEMORY_ORIGIN_CACHE_DAYS` / `DSH_MEMORY_ORIGIN_CACHE_MB` 可调
 - **确认闸门**：`memory_save` 只认用户原话里的「记住 / 纠正 / 长期偏好」信号，有信号才直接生效；
   没有就落 `suggested`（待确认）——不进副库、不进骨架、不参与检索，等用户点头再 `memory_confirm`。
   待确认条目不占容量位，也不会取代已生效的旧说法；超过 3 天没人点头自动归档（主库文件仍留着，可复活）；
@@ -134,6 +162,29 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
 
 规矩：**先写主库，再写副库**。副库坏了、删了，跑 `node tools/rebuild-index.mjs` 从主库重建；
 主库里的条目删掉时只挪进 `archive/full/`，不物理删。
+
+## 历史会话补录
+
+记忆库是新装的 / 清空过，但 `$DSH_HOME/sessions/` 里还留着旧对话时，先预演再决定：
+
+```bash
+node tools/import-history.mjs                       # 预演：只看报告，不写盘
+node tools/import-history.mjs --apply               # 规则抽取，真正写入
+node tools/import-history.mjs --apply --llm         # 允许调蒸馏模型（更慢，花 token）
+node tools/import-history.mjs --rollback imp-...    # 按清单整批回滚
+```
+
+- **只导蒸馏后的条目**，不复制原始会话；默认丢掉已经过期的计划类事件（`--events` 才带），
+  稳定事实、偏好、工程约定照常收
+- **不猜身份**：只导当前 QQ 绑定表里能确定分片的会话；历史会话的 session id 不在表里时跳过，
+  确认归属后用 `--map <session-id>=private:<QQ>`（群用 `group:<群号>`）显式指定
+- **配额**：每个分片默认最多 320 条生效记忆（低于全局 400），本次运行最多新增 200 条；
+  到顶就停，后面再补不会把分片挤爆
+- **可回滚**：条目 `source=import:<run>`，清单落 `archive/imports/<run>.json`；
+  回滚只删这一批新造、且正文没被后来改过的条目
+- **写盘时 DSH 必须关闭**，避免插件进程和工具同时改分片；
+  实在关不掉用 `DSH_MEMORY_IMPORT_FORCE=1`
+- 常用筛选：`--since 2026-10-01`、`--max-sessions 20`、`--max-messages 200`
 
 ## 记忆什么时候进提示词（重要）
 
@@ -249,7 +300,7 @@ window.__ModuleLoader__.load({ id: '<包名>', factory: (require) => { ... } })
 ## 测试
 
 ```
-npm test                # 29 组全跑，零外部依赖，不联网
+npm test                # 全部测试，零外部依赖，不联网
 ```
 
 单跑某一组：
@@ -266,6 +317,10 @@ node test/hygiene.mjs   # 元消息 / 孤儿 staging / 手动删除 / 写保护 
 node test/local.mjs     # 本地会话：采集 → local:dsh → 工程抽取 → 注入 → 工具写
 node test/confirm.mjs   # 确认闸门：suggested 不进目录，点头才生效
 node test/watermark.mjs # 蒸馏水位：中途追加不丢，重跑不重
+node test/import.mjs    # 历史导入：身份边界 / 过期计划 / 配额 / 清单回滚
+node test/origin.mjs    # 原文指针：按指纹回溯 / 缺失退回原话 / 可选缓存
+node test/skill.mjs     # 技能：必填字段 / 不进骨架 / 失败复核 / 每分片限流
+node test/build.mjs     # 构建指纹：版本对不上不拼 commit / 非 git 目录也能生成
 node test/client.mjs    # 客户端 bundle 离线冒烟
 node test/persona.mjs   # 人格闸门 + 20 项探针 + 变更日志
 node test/personaauto.mjs # 人格自动迭代：门槛 / 每周一次 / 连续通过 / 拒绝清零
@@ -286,6 +341,7 @@ $DSH_HOME/dsh-memory/        （可用 DSH_MEMORY_HOME 改到别处）
 ├─ staging/                  待蒸馏的原始消息
 │  └─ orphan/               认不出来源的会话（停用，不删）
 ├─ archive/                  归档
+│  └─ imports/              历史导入清单（可整批回滚）
 ├─ audit/                    账本
 ├─ graph/                     L3 图谱（nodes.jsonl / edges.jsonl / triples.jsonl）
 └─ logs/

@@ -1,15 +1,18 @@
 {
   "name": "dsh-whale-memory",
-  "version": "0.17.1",
+  "version": "0.18.0",
   "description": "大肥鱼的记忆库：固定人格 + 分层记忆 + 用户/群分片 + 蒸馏 + 遗忘归档 + 审计账本。",
   "type": "module",
   "scripts": {
-    "test": "node test/smoke.mjs && node test/bridge-adapter.mjs && node test/vault.mjs && node test/pipeline.mjs && node test/tools.mjs && node test/funnel.mjs && node test/local.mjs && node test/confirm.mjs && node test/gate.mjs && node test/watermark.mjs && node test/kinds.mjs && node test/namespace.mjs && node test/persona.mjs && node test/personaauto.mjs && node test/personadistill.mjs && node test/docs.mjs && node test/metrics.mjs && node test/lifecycle.mjs && node test/pin.mjs && node test/trust.mjs && node test/resume.mjs && node test/memory.mjs && node test/timeline.mjs && node test/apply.mjs && node test/graph.mjs && node test/hygiene.mjs && node test/llm.mjs && node test/models.mjs && node test/settings.mjs && node test/profile.mjs && node test/recall.mjs && node test/time.mjs && node test/client.mjs && node test/visibility.mjs && node test/review.mjs && node test/health.mjs && node test/backup.mjs && node test/inbound.mjs && node test/beat.mjs && node test/beat-host.mjs && node test/beat-lock.mjs && node test/diary.mjs",
+    "test": "node test/smoke.mjs && node test/bridge-adapter.mjs && node test/vault.mjs && node test/pipeline.mjs && node test/tools.mjs && node test/funnel.mjs && node test/local.mjs && node test/confirm.mjs && node test/gate.mjs && node test/watermark.mjs && node test/kinds.mjs && node test/skill.mjs && node test/import.mjs && node test/origin.mjs && node test/namespace.mjs && node test/persona.mjs && node test/personaauto.mjs && node test/personadistill.mjs && node test/docs.mjs && node test/metrics.mjs && node test/lifecycle.mjs && node test/pin.mjs && node test/trust.mjs && node test/resume.mjs && node test/memory.mjs && node test/dedupe.mjs && node test/timeline.mjs && node test/apply.mjs && node test/graph.mjs && node test/hygiene.mjs && node test/llm.mjs && node test/models.mjs && node test/settings.mjs && node test/profile.mjs && node test/recall.mjs && node test/time.mjs && node test/client.mjs && node test/visibility.mjs && node test/review.mjs && node test/health.mjs && node test/backup.mjs && node test/inbound.mjs && node test/beat.mjs && node test/beat-host.mjs && node test/beat-lock.mjs && node test/diary.mjs && node test/build.mjs",
     "beat": "node tools/beat.mjs",
     "eval": "node test/eval/run.mjs",
     "eval:compare": "node test/eval/run.mjs --compare",
     "rebuild-index": "node tools/rebuild-index.mjs",
+    "dedupe": "node tools/dedupe.mjs",
     "persona": "node tools/persona.mjs",
+    "import-history": "node tools/import-history.mjs",
+    "build-info": "node tools/build-info.mjs",
     "memory-trust": "node tools/memory-trust.mjs",
     "metrics": "node tools/metrics.mjs"
   },

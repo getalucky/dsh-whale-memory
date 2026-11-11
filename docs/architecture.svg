@@ -34,8 +34,8 @@
 
   <!-- Header -->
   <text x="48" y="54" font-size="30" font-weight="700" fill="#0f172a">dsh-whale-memory 系统架构</text>
-  <text x="48" y="82" font-size="13.5" fill="#475569">固定人格 + 分层记忆 + 分片隔离 + 蒸馏淡忘 + 按需注入 · DSH 插件 v0.16.0</text>
-  <text x="1672" y="56" font-size="12" fill="#94a3b8" text-anchor="end">2026-11-10 · 按仓库当前代码整理</text>
+  <text x="48" y="82" font-size="13.5" fill="#475569">固定人格 + 分层记忆 + 分片隔离 + 蒸馏淡忘 + 按需注入 · DSH 插件 v0.18.0</text>
+  <text x="1672" y="56" font-size="12" fill="#94a3b8" text-anchor="end">2026-11-11 · 按仓库当前代码整理</text>
   <text x="1672" y="78" font-size="12" fill="#94a3b8" text-anchor="end">实线 = 主链路 · 虚线 = 可选 / 定时 / 侧路</text>
 
   <!-- ============ Band A: sources ============ -->

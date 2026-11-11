@@ -64,7 +64,7 @@ try {
 
   // 解析：围栏、坏 kind、空数组、src 越界
   assert.deepEqual(parseCandidates('废话\n```json\n[{"text":"老爹喜欢冰美式","kind":"pref","conf":0.8}]\n```'), [
-    { text: '老爹喜欢冰美式', kind: 'pref', conf: 0.8, src: -1, speaker: '' },
+    { text: '老爹喜欢冰美式', kind: 'pref', conf: 0.8, src: -1, speaker: '', scene: '', mergeId: '' },
   ])
   assert.equal(parseCandidates('没有 json'), null)
   assert.deepEqual(parseCandidates('[]'), [], '合法空数组是「这轮没东西可记」，不是解析失败')
@@ -117,6 +117,25 @@ try {
   )
   assert.equal(lastLlmError(), '', '空数组不该留下失败原因')
   ok('空候选正常返回，不触发冷却')
+
+  // 带旧记忆去查重：合法的 merge_id 要保留，编的 id 要丢掉；scene 原样带回
+  const mergeStub = async () => jsonRes({
+    choices: [{
+      message: {
+        content: '[{"text":"老爹要求菜单横向，点主菜单后子菜单显示在内容页顶部","kind":"pref","src":0,"speaker":"老爹","scene":"在调设置页菜单","merge_id":"m_old"},{"text":"另一条事实","kind":"fact","src":0,"merge_id":"m_fake"}]',
+      },
+      finish_reason: 'stop',
+    }],
+  })
+  const merged = await distillMessages(
+    [{ at: '2026-11-11T02:20:00', speaker: '老爹', text: '菜单整成横向，子菜单别藏着' }],
+    { fetchImpl: mergeStub, existing: [{ id: 'm_old', kind: 'pref', text: '菜单要横向' }] },
+  )
+  assert.ok(merged, `蒸馏查重返回 null：${lastLlmError()}`)
+  assert.equal(merged[0].mergeId, 'm_old')
+  assert.equal(merged[0].scene, '在调设置页菜单')
+  assert.equal(merged[1].mergeId, '', '不存在的 merge_id 不能放行')
+  ok('蒸馏查重：merge_id 对得上旧记忆才保留')
 
   // 输出被截断：自动用更大预算重试一次；仍然不全才报截断。
   let truncCalls = 0
@@ -272,6 +291,29 @@ try {
   assert.ok(sc.items.some((x) => x.text === '老爹刚下班回家'), JSON.stringify(sc.items))
   assert.ok(sc.items.every((x) => !x.text.includes('累死了')), '规则不该把寒暄当事实')
   ok('LLM 蒸馏接入 distillSession')
+
+  // 模型把同一条偏好拆成两句：同批兜底要合成一条，不能照单全收
+  await writeFile(join(paths(root).staging, 'sess-llm.jsonl'), [
+    { at: '2026-11-11T02:19:41', role: 'user', speaker: '老爹', text: '菜单整成横向，子菜单并不直接显示，只有点击主菜单才有选择对应下的子菜单' },
+    { at: '2026-11-11T02:32:02', role: 'user', speaker: '老爹', text: '子菜单不要藏在主菜单里做二级菜单，子菜单可以当点击主菜单后，主菜单内容页中顶部显示子菜单' },
+  ].map((x) => JSON.stringify(x)).join('\n') + '\n', 'utf8')
+  const menuStub = async () => jsonRes({
+    choices: [{
+      message: {
+        content: JSON.stringify([
+          { text: '要求菜单做成横向，子菜单不直接显示，只有点击主菜单后才显示对应下的子菜单', kind: 'pref', conf: 0.8, src: 0, speaker: '老爹' },
+          { text: '要求子菜单不要藏在主菜单里做成二级菜单，而是在点击主菜单后显示在主菜单内容页的顶部', kind: 'pref', conf: 0.8, src: 1, speaker: '老爹' },
+        ]),
+      },
+    }],
+  })
+  const rm = await distillSession(root, 'sess-llm', { log: () => {}, fetchImpl: menuStub })
+  assert.equal(rm.ok, true, JSON.stringify(rm))
+  const scm = await loadScope(root, 'private', '123456789')
+  const menus = scm.items.filter((x) => x.kind === 'pref' && x.text.includes('菜单'))
+  assert.equal(menus.length, 1, JSON.stringify(menus.map((x) => x.text)))
+  assert.ok(menus[0].text.includes('横向') && menus[0].text.includes('二级菜单'), menus[0].text)
+  ok('同批候选：同一件事的两个说法只存一条')
 
   // 时间锚 + 规则补漏 + 后写升级：
   //   · 「下周三」按 src 指的那条消息（10-30）算，不是按会话最后一句（11-09）算
