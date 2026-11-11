@@ -19,11 +19,12 @@ process.env.DSH_MEMORY_EMBED_BASE = 'http://stub.local/v1'
 process.env.DSH_MEMORY_EMBED_MODEL = 'stub-embed'
 
 const {
-  llmReady, embedReady, parseCandidates, distillMessages, embedTexts, lastLlmError,
+  llmReady, embedReady, parseCandidates, parseTriples, distillMessages, extractGraphTriples, embedTexts, lastLlmError,
 } = await import('../lib/llm.js')
 const { fuseRankings } = await import('../lib/recall.js')
 const { ensureDirs, loadScope, paths } = await import('../lib/store.js')
 const { distillSession } = await import('../lib/distill.js')
+const { loadTriples } = await import('../lib/graph.js')
 const { loadSources, resetSourceCache } = await import('../lib/source.js')
 
 let pass = 0
@@ -63,10 +64,10 @@ try {
 
   // 解析：围栏、坏 kind、空数组、src 越界
   assert.deepEqual(parseCandidates('废话\n```json\n[{"text":"老爹喜欢冰美式","kind":"pref","conf":0.8}]\n```'), [
-    { text: '老爹喜欢冰美式', kind: 'pref', conf: 0.8, src: -1 },
+    { text: '老爹喜欢冰美式', kind: 'pref', conf: 0.8, src: -1, speaker: '' },
   ])
   assert.equal(parseCandidates('没有 json'), null)
-  assert.equal(parseCandidates('[]'), null)
+  assert.deepEqual(parseCandidates('[]'), [], '合法空数组是「这轮没东西可记」，不是解析失败')
   assert.equal(parseCandidates('[{"text":"短","kind":"x"}]'), null, '太短应丢弃')
   assert.equal(parseCandidates('[{"text":"正常长度的一句话","kind":"xx","conf":9}]')[0].kind, 'fact', '未知 kind 回落 fact')
   assert.equal(
@@ -79,9 +80,85 @@ try {
   )
   ok('候选解析与校验')
 
+  // 三元组解析：id 必须能对回输入，时间词/问句实体不收
+  assert.deepEqual(
+    parseTriples('```json\n[{"item":"m1","s":"老爹","sType":"person","rel":"喜欢","o":"冰美式","oType":"thing"}]\n```', ['m1']),
+    [{ item: 'm1', s: '老爹', sType: 'person', rel: '喜欢', o: '冰美式', oType: 'thing' }],
+  )
+  assert.equal(parseTriples('没有 json'), null)
+  assert.deepEqual(parseTriples('[]'), [], '合法空数组表示这批没有关系')
+  assert.deepEqual(parseTriples('[{"item":"m2","s":"A","rel":"喜欢","o":"B"}]', ['m1']), [], '对不上输入 id 的丢弃')
+  assert.deepEqual(parseTriples('[{"item":"m1","s":"以后","rel":"是","o":"B"}]', ['m1']), [], '时间词不当实体')
+  ok('三元组解析与校验')
+
+  let graphPrompt = ''
+  const graphStub = async (url, init) => {
+    graphPrompt = JSON.parse(init.body).messages[1].content
+    return jsonRes({
+      choices: [{ message: { content: '[{"item":"m1","s":"老爹","sType":"person","rel":"养了","o":"鲸鱼","oType":"thing"}]' } }],
+    })
+  }
+  const triples = await extractGraphTriples([{ id: 'm1', text: '老爹养了一条鲸鱼' }], { fetchImpl: graphStub })
+  assert.equal(triples.length, 1)
+  assert.equal(triples[0].item, 'm1')
+  assert.equal(triples[0].rel, '养了')
+  assert.ok(graphPrompt.includes('[m1]'), '输入要带条目 id：' + graphPrompt)
+  ok('三元组抽取：id 对齐 + 严格 JSON')
+
   const cands = await distillMessages([{ at: '2026-10-30T12:00:00', speaker: '老爹', text: '今天累死了刚到家' }], { fetchImpl: chatStub })
   assert.equal(cands[0].text, '老爹刚下班回家')
   ok('distillMessages 走 chat/completions')
+
+  // 空数组是正常结果：不能记成失败，否则会触发十分钟冷却。
+  const emptyOk = async () => jsonRes({ choices: [{ message: { content: '[]' }, finish_reason: 'stop' }] })
+  assert.deepEqual(
+    await distillMessages([{ at: '', text: '今天挺热的' }], { fetchImpl: emptyOk }),
+    [],
+  )
+  assert.equal(lastLlmError(), '', '空数组不该留下失败原因')
+  ok('空候选正常返回，不触发冷却')
+
+  // 输出被截断：自动用更大预算重试一次；仍然不全才报截断。
+  let truncCalls = 0
+  const truncStub = async () => {
+    truncCalls += 1
+    return jsonRes({
+      choices: [{
+        message: { content: truncCalls === 1 ? '[{"text":"老爹喜欢' : '[{"text":"老爹喜欢冰美式","kind":"pref"}]' },
+        finish_reason: truncCalls === 1 ? 'length' : 'stop',
+      }],
+    })
+  }
+  const retried = await distillMessages([{ at: '', text: '记住，我喜欢冰美式' }], { fetchImpl: truncStub })
+  assert.equal(truncCalls, 2, '截断后应重试一次')
+  assert.equal(retried[0].text, '老爹喜欢冰美式')
+  let truncFailCalls = 0
+  const truncFailStub = async () => {
+    truncFailCalls += 1
+    return jsonRes({
+      choices: [{ message: { content: '[{"text":"老爹喜欢' }, finish_reason: 'length' }],
+    })
+  }
+  assert.equal(await distillMessages([{ at: '', text: '记住，我喜欢冰美式' }], { fetchImpl: truncFailStub }), null)
+  assert.equal(truncFailCalls, 2)
+  assert.match(lastLlmError(), /截断/)
+  ok('截断重试与失败原因')
+
+  // 输入按条截短，最近的消息必须完整保留（以前是拼完再截头，最新的会被砍掉）。
+  let packedPrompt = ''
+  const packStub = async (_url, init) => {
+    packedPrompt = JSON.parse(init.body).messages[1].content
+    return jsonRes({ choices: [{ message: { content: '[]' }, finish_reason: 'stop' }] })
+  }
+  const many = Array.from({ length: 40 }, (_, i) => ({
+    at: `2026-11-07T10:${String(i).padStart(2, '0')}:00`,
+    speaker: '老爹',
+    text: `第${i}条 ` + '长'.repeat(500),
+  }))
+  await distillMessages(many, { fetchImpl: packStub })
+  assert.ok(packedPrompt.includes('[39]'), '最新一条不能丢')
+  assert.ok(packedPrompt.length < 7000, '输入应按条截断：' + packedPrompt.length)
+  ok('40 条长消息按条截短且保留最新')
 
   // src 是「传进来那一批」的下标：模型看到的是紧凑编号，返回后要映射回去
   let sentPrompt = ''
@@ -109,20 +186,47 @@ try {
     groupSys = body.messages[0].content
     groupUser = body.messages[1].content
     return jsonRes({
-      choices: [{ message: { content: '[{"text":"陆小鱼称呼自己的主人为老爹","kind":"relation","conf":0.6,"src":1}]' } }],
+      choices: [{ message: { content: '[{"text":"陆小鱼称呼自己的主人为老爹","kind":"relation","conf":0.6,"src":1,"speaker":"陆小鱼"}]' } }],
     })
   }
   const scoped = await distillMessages([
     { at: '2026-11-07T10:29:00', speaker: '老板', text: '今天加班到十点', owner: true },
-    { at: '2026-11-07T10:30:00', speaker: '陆小鱼', text: '怎么天天有人想来抢老爹', owner: false },
+    { at: '2026-11-07T10:30:00', speaker: '陆小鱼', qq: '10001', text: '怎么天天有人想来抢老爹', owner: false },
   ], { fetchImpl: groupStub, group: true, ownerName: '老板' })
   assert.equal(scoped.length, 1)
+  assert.equal(scoped[0].speaker, '陆小鱼', '模型报的发言人能对上输入行时要保留')
   assert.ok(groupUser.includes('[拥有者] 老板：'), '拥有者那条要带标记：' + groupUser)
   assert.ok(!groupUser.includes('[拥有者] 陆小鱼'), '别人的发言不该带拥有者标记：' + groupUser)
   assert.ok(groupSys.includes('「老板」'), '提示词要用配置里的称呼：' + groupSys)
   assert.ok(groupSys.includes('其他人口中的「老爹」'), '群聊提示词要区分别人家的老爹')
   assert.ok(groupSys.includes('称呼自己的主人为老爹'), '给模型一个正确转述示例')
-  ok('群聊蒸馏：拥有者标记 + 动态称呼')
+  assert.ok(groupSys.includes('"speaker"') || groupSys.includes('speaker 字段'), '提示词要要求返回发言人')
+  assert.ok(groupSys.includes('代词纪律'), '提示词要有代词纪律')
+  ok('群聊蒸馏：拥有者标记 + 动态称呼 + 发言人校验')
+
+  // 模型编一个不在输入里的发言人：不能信，留给 src 那条消息兜底
+  const fakeStub = async () => jsonRes({
+    choices: [{ message: { content: '[{"text":"有人想抢老爹","kind":"event","conf":0.6,"src":1,"speaker":"群里的人"}]' } }],
+  })
+  const fake = await distillMessages([
+    { at: '2026-11-07T10:30:00', speaker: '陆小鱼', text: '怎么天天有人想来抢老爹' },
+  ], { fetchImpl: fakeStub, group: true, ownerName: '老板' })
+  assert.equal(fake[0].speaker, '', '对不上的发言人不能写进记忆')
+  ok('群聊蒸馏：编造的发言人被丢弃')
+
+  // 同名不同人：同批里两个「小鱼」用 QQ 尾号区分，模型也得照抄
+  let dupUser = ''
+  const dupStub = async (url, init) => {
+    dupUser = JSON.parse(init.body).messages[1].content
+    return jsonRes({ choices: [{ message: { content: '[]' } }] })
+  }
+  await distillMessages([
+    { at: '', speaker: '小鱼', qq: '13800001111', text: '我住杭州' },
+    { at: '', speaker: '小鱼', qq: '13900002222', text: '我住成都' },
+  ], { fetchImpl: dupStub, group: true })
+  assert.ok(dupUser.includes('小鱼（尾号1111）：'), '同名要给尾号：' + dupUser)
+  assert.ok(dupUser.includes('小鱼（尾号2222）：'), '同名要给尾号：' + dupUser)
+  ok('群聊蒸馏：同名不同人按尾号区分')
 
   const fail = async () => ({ ok: false, json: async () => ({}) })
   assert.equal(await distillMessages([{ at: '', text: 'x' }], { fetchImpl: fail }), null)
@@ -215,6 +319,32 @@ try {
   assert.equal(pnpm.text, '统一用 pnpm 管依赖，不要再装 npm', 'LLM 的长表述要升级规则截出来的半句')
   assert.ok(pnpm.history?.some((h) => h.text === '统一用 pnpm 管依赖'), '旧说法留在 history')
   ok('本地分片双写 + 后写升级')
+
+  // 蒸馏后的图谱补抽：第一次请求出候选，第二次请求出三元组
+  let graphAsk = 0
+  const bothStub = async (url, init) => {
+    graphAsk += 1
+    const user = JSON.parse(init.body).messages[1].content
+    if (graphAsk === 1) {
+      return jsonRes({ choices: [{ message: { content: '[{"text":"陆小鱼喜欢喝乌龙茶","kind":"pref","conf":0.8,"src":0}]' } }] })
+    }
+    const id = (user.match(/\[(m_[^\]]+)\]/) || [])[1]
+    return jsonRes({
+      choices: [{ message: { content: JSON.stringify([{ item: id, s: '陆小鱼', sType: 'person', rel: '喜欢', o: '乌龙茶', oType: 'thing' }]) } }],
+    })
+  }
+  await writeFile(join(paths(root).staging, 'sess-llm.jsonl'),
+    JSON.stringify({ at: '2026-11-09T10:00:00', role: 'user', speaker: '陆小鱼', text: '记住：陆小鱼喜欢喝乌龙茶' }) + '\n', 'utf8')
+  const r5 = await distillSession(root, 'sess-llm', { log: () => {}, fetchImpl: bothStub })
+  assert.equal(r5.ok, true, JSON.stringify(r5))
+  assert.equal(r5.fresh, undefined, '临时字段不该带出去')
+  assert.equal(graphAsk, 2, '蒸馏后应该再请求一次三元组')
+  const rows = await loadTriples(root)
+  assert.ok(
+    rows.some((t) => t.s === '陆小鱼' && t.rel === '喜欢' && t.o === '乌龙茶'),
+    JSON.stringify(rows),
+  )
+  ok('蒸馏后自动补图谱三元组')
 
   // LLM 挂了：规则照常兜底
   await writeFile(join(paths(root).staging, 'sess-llm.jsonl'),

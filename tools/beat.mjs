@@ -15,13 +15,12 @@
 
 import { rootDir } from '../lib/store.js'
 import { loadConfig, ensureBeatDirs, saveConfig } from '../lib/beat/config.js'
-import { loadState, runOnce } from '../lib/beat/index.js'
+import { loadState, runOnce, updateState } from '../lib/beat/index.js'
 import { materialCounts, materialList } from '../lib/beat/material.js'
 import { maintain } from '../lib/beat/maintain.js'
 import { loadSessions } from '../lib/beat/session.js'
 import { burnSensitive, sensitiveFiles, vaultInfo } from '../lib/secure/vault.js'
 import { profileStatus, rebuildProfile } from '../lib/person/rebuild.js'
-import { saveState } from '../lib/beat/index.js'
 import { setConfigRoot } from '../lib/llm.js'
 
 const root = process.env.DSH_MEMORY_HOME || rootDir()
@@ -127,18 +126,16 @@ async function main() {
 
   if (cmd === 'focus') {
     const v = args[1] || ''
-    const state = await loadState(root)
     if (v === 'off' || v === '0') {
-      state.focusUntil = ''
-      await saveState(root, state)
+      await updateState(root, (st) => { st.focusUntil = '' })
       console.log('专注模式已关。')
       return
     }
     const min = Math.max(1, Math.min(1440, Number(v) || 0))
     if (!min) { console.log('用法：focus <1-1440 分钟> 或 focus off'); process.exitCode = 1; return }
-    state.focusUntil = new Date(Date.now() + min * 60000).toISOString()
-    await saveState(root, state)
-    console.log(`专注模式到 ${state.focusUntil}。`)
+    const focusUntil = new Date(Date.now() + min * 60000).toISOString()
+    await updateState(root, (st) => { st.focusUntil = focusUntil })
+    console.log(`专注模式到 ${focusUntil}。`)
     return
   }
 

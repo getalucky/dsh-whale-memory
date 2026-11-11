@@ -48,14 +48,14 @@ const toolsFor = (mode) => {
 
 try {
   // 写入按「最近活跃会话」落分片，每个用例执行前都要先喂一条，别串到别人头上
-  await h.feed({ id: 'enf', turns: ['今天挺热的'] })
+  await h.feed({ id: 'enf', turns: ['今天挺热的', '我把钥匙放在鞋柜上了'] })
   const enf = await toolsFor('enforce').get('memory_save').execute({
     text: '用户把钥匙放在鞋柜上', source_quote: '我把钥匙放在鞋柜上了',
   })
   assert.equal(enf.status, 'suggested', JSON.stringify(enf))
   ok('enforce：没信号进待确认')
 
-  await h.feed({ id: 'warn', turns: ['今天挺热的'] })
+  await h.feed({ id: 'warn', turns: ['今天挺热的', '我把钥匙放在餐桌上了'] })
   const warn = await toolsFor('warn').get('memory_save').execute({
     text: '用户把钥匙放在餐桌上', source_quote: '我把钥匙放在餐桌上了',
   })
@@ -67,7 +67,7 @@ try {
   assert.ok(audit.includes('"gate":"warn"'), audit.slice(-400))
   ok('warn：放行但条目 / 审计都留记号')
 
-  await h.feed({ id: 'off', turns: ['今天挺热的'] })
+  await h.feed({ id: 'off', turns: ['今天挺热的', '我把钥匙放在书架上了'] })
   const off = await toolsFor('off').get('memory_save').execute({
     text: '用户把钥匙放在书架上', source_quote: '我把钥匙放在书架上了',
   })
@@ -75,7 +75,7 @@ try {
   assert.equal(off.gate, 'off')
   ok('off：只记录、不拦')
 
-  await h.feed({ id: 'warn', turns: ['今天挺热的'] })
+  await h.feed({ id: 'warn', turns: ['今天挺热的', '记住，我喜欢喝乌龙茶'] })
   const direct = await toolsFor('warn').get('memory_save').execute({
     text: '用户喜欢喝乌龙茶', kind: 'pref', source_quote: '记住，我喜欢喝乌龙茶',
   })

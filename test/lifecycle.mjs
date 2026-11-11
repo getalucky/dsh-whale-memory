@@ -67,6 +67,23 @@ try {
   assert.equal(e2.expiresAt, '')
   ok('过期条目可复活并清掉 TTL')
 
+  // 5. 待确认没人点头：3 天自动归档，3 天内留着
+  const sc2 = emptyScope('private', '88', '私聊 88')
+  const stale = addItem(sc2, { text: '用户说下个月想去大理', kind: 'fact', conf: 0.5, state: 'suggested' })
+  const fresh = addItem(sc2, { text: '用户说周末要修显示器', kind: 'fact', conf: 0.5, state: 'suggested' })
+  stale.created = new Date(Date.now() - 4 * 86400000).toISOString()
+  fresh.created = new Date(Date.now() - 1 * 86400000).toISOString()
+  await saveScope(root, sc2)
+  const rf = await runForget(root, {})
+  assert.ok(rf.archived >= 1, JSON.stringify(rf))
+  const sc2After = await loadScope(root, 'private', '88')
+  assert.ok(!sc2After.items.some((x) => x.id === stale.id), '超过 3 天的待确认应被清出分片')
+  assert.equal(sc2After.items.find((x) => x.id === fresh.id)?.state, 'suggested', '3 天内的待确认要留着')
+  const p2 = vaultPaths(root, 'private', '88')
+  const kept = await readFile(join(p2.archiveFull, `${stale.id}.md`), 'utf8')
+  assert.ok(kept.includes('大理'), '清掉的待确认要进 archive/full，不能物理删')
+  ok('待确认 3 天没回应：自动归档，pending 不再挂着')
+
   console.log(`\n${pass} 通过 · 0 失败`)
 } finally {
   await rm(root, { recursive: true, force: true }).catch(() => {})

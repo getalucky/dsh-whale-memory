@@ -2,7 +2,7 @@
  * funnel.mjs —— 两级漏斗验收（阶段 4）
  *
  * 验的是文档第六章：
- *   · 只在副库字段上检索，不碰正文
+ *   · 摘要 + 正文参与召回（摘要偏抽象，具体名词/梗常只在正文里）
  *   · 无命中不硬凑（单字兜底不算命中）
  *   · 一跳/二跳标签展开，0.7 衰减，候选 ≤2K
  *   · 过期条目不进候选
@@ -85,12 +85,15 @@ const many = searchFunnel([sc3], { query: '数学作业', hops: true, topK: 8 })
 assert.ok(many.length <= Math.min(FUNNEL.maxCandidates, 16), String(many.length))
 ok('候选上限：≤2K')
 
-// 8. 正文不参与检索：摘要里没有的正文词，不该被命中
+// 8. 正文参与召回：摘要里没有的具体词，也能从正文里命中
 const sc4 = emptyScope('private', '4')
 const deep = item('m_deep', '一句摘要')
 deep.text = '一句摘要；正文里藏着蓝鲸协议四个字'
+deep.summary = '一句摘要'
 sc4.items = [deep]
-assert.equal(searchFunnel([sc4], { query: '蓝鲸协议' }).length, 0)
-ok('检索只看副库字段，不读正文')
+const deepHit = searchFunnel([sc4], { query: '蓝鲸协议' })
+assert.equal(deepHit.length, 1, JSON.stringify(deepHit))
+assert.ok(deepHit[0].match.includes('蓝鲸协议'), JSON.stringify(deepHit[0]))
+ok('正文参与召回：摘要外的具体词能命中，并带上下文片段')
 
 console.log(`\n${pass} 通过 · 0 失败`)

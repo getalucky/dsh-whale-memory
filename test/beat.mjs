@@ -10,11 +10,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeFile, mkdir } from 'node:fs/promises'
 
-import { DEFAULT_CONFIG, deliveriesPath, ensureBeatDirs, loadConfig, saveConfig } from '../lib/beat/config.js'
+import {
+  DEFAULT_CONFIG, deliveriesPath, ensureBeatDirs, loadConfig, saveConfig, topicPath,
+} from '../lib/beat/config.js'
 import { dayKey, inWindow, jitter, nextWindowStart, toMinutes, wanderDue } from '../lib/beat/schedule.js'
 import { checkGate } from '../lib/beat/gate.js'
 import {
-  addMaterial, adjustMaterial, gcMaterial, loadMaterial, markUsed, materialCounts, resurface, scoreOf,
+  addMaterial, adjustMaterial, gcMaterial, loadMaterial, markUsed, materialCounts,
+  relevantCandidates, resurface, scoreOf, topicScore,
 } from '../lib/beat/material.js'
 import { pullPublic } from '../lib/beat/sources/public.js'
 import { addChatMaterial, extractChatCandidates } from '../lib/beat/sources/chat.js'
@@ -109,6 +112,10 @@ async function main() {
       source: 'web:city', focus: '城市',
     }, { config: saved, now: at(12) })
     assert.equal(dup.duplicate, true)
+    const sub = await addMaterial(root, {
+      text: '24 小时书店', source: 'chat', originId: 'chat-sub-1',
+    }, { config: saved, now: at(12) })
+    assert.equal(sub.duplicate, true, '包含关系的素材应判重')
     const bad = await addMaterial(root, { text: '没来源', source: 'web' }, { config: saved, now: at(12) })
     assert.equal(bad.ok, false)
     const chatBad = await addMaterial(root, { text: '聊天素材', source: 'chat' }, { config: saved, now: at(12) })
@@ -427,7 +434,24 @@ async function main() {
     assert.ok(fullPack.includes('后半句在这'), '旧素材的半句应换成完整原话')
     const mixed = mixCandidates({ chat: [{ id: 'c1' }], fresh: [{ id: 'w1' }, { id: 'w2' }] })
     assert.equal(mixed[0].id, 'c1')
-    assert.ok(mixed.length <= 3)
+    assert.equal(mixed.length, 3, '候选不够就不够，不能随机补位')
+    const two = mixCandidates({ chat: [{ id: 'c1' }], fresh: [{ id: 'w1' }], max: 6 })
+    assert.equal(two.length, 2)
+
+    // 投递前对话题：搭得上的才留，不搭的宁可少投
+    const topicMsgs = ['部署脚本是在 DSH 关闭的时候跑吗？', '对，跑完再重启，lib 改完必须 deploy。']
+    const relPicks = relevantCandidates(topicMsgs, [
+      { id: 'book', text: '隔壁市开了家 24 小时书店', weight: 0.9 },
+      { id: 'deploy', text: 'dsh-whale-memory 的 lib 改动后需要 deploy', weight: 0.4 },
+    ])
+    assert.deepEqual(relPicks.map((x) => x.id), ['deploy'])
+    assert.ok(relPicks[0].relevance >= 0.2)
+    assert.equal(relevantCandidates(topicMsgs, [{ id: 'food', text: '今天中午吃什么好' }]).length, 0)
+    assert.ok(topicScore(topicMsgs, { text: '部署脚本是在 DSH 关闭时运行的' }) > 0.5)
+    // 两三个字的巧合不算搭：投递素材里最常被误投的一类
+    assert.equal(topicScore(['给我一条最近三天的时间线'], { text: '[引用了一条消息] 这编得越来越离谱了' }), 0)
+    // 4 字以上连续重合才是真的在聊同一件事
+    assert.ok(topicScore(['DSH 插件市场最近很热闹'], { text: '官方已开放 DSH 插件作者登记，支持 Token 激励' }) > 0.2)
     const bigPack = buildPack({
       deliveryId: 'd-big',
       materials: Array.from({ length: 6 }, (_, i) => ({ id: 'm' + i, source: 'web:city', text: '长'.repeat(200), refs: ['https://example.com/' + i] })),
@@ -500,6 +524,11 @@ async function main() {
           targetSessionId: 'session-busy',
         })
         await saveState(bRoot, { lastWanderAt: at(12).toISOString() })
+        // 绑了目标之后投递前要先对话题：没有 staging 会卡在 no-topic，走不到写句柄冲突
+        await mkdir(paths(bRoot).staging, { recursive: true })
+        await writeFile(join(paths(bRoot).staging, 'session-busy.jsonl'),
+          JSON.stringify({ at: at(11, 50).toISOString(), role: 'user', text: '被占用时的一条素材是怎么回事？' }) + '\n',
+          'utf8')
         const cfg2 = await loadConfig(bRoot, { reload: true })
         const busy = Object.assign(new Error('session "session-busy" is already owned by an active write handle'), {
           name: 'SessionAlreadyOwnedError',
@@ -516,6 +545,78 @@ async function main() {
         assert.equal(ledger.at(-1).outcome, 'busy')
       } finally {
         await rm(bRoot, { recursive: true, force: true })
+      }
+    }
+
+    // 9.65 投递前对目标会话的当下话题：不搭就不投，也不按数量凑
+    {
+      const tRoot = await mkdtemp(join(tmpdir(), 'whale-topic-'))
+      try {
+        await ensureDirs(tRoot)
+        await ensureBeatDirs(tRoot)
+        const tCfg = await saveConfig(tRoot, {
+          enabled: true, dryRun: true, refillBelow: 1, minIntervalHours: 999,
+          quietHours: { start: '01:00', end: '08:00' },
+          windows: [{ start: '11:00', end: '15:00' }],
+          targetSessionId: 'session-topic',
+          busyMinutes: 0, tokenSaverIdleMinutes: 100000,
+        })
+        await addMaterial(tRoot, {
+          text: '部署脚本是在 DSH 关闭时运行的', source: 'web',
+          refs: ['https://example.com/deploy'], focus: '部署',
+        }, { config: tCfg, now: at(12) })
+        await addMaterial(tRoot, {
+          text: '隔壁市开了家 24 小时书店', source: 'web',
+          refs: ['https://example.com/book'], focus: '书店',
+        }, { config: tCfg, now: at(12) })
+
+        const staging = join(paths(tRoot).staging, 'session-topic.jsonl')
+        await mkdir(paths(tRoot).staging, { recursive: true })
+        await writeFile(staging, [
+          { at: at(11, 58).toISOString(), role: 'user', text: '部署脚本是在 DSH 关闭的时候跑吗？' },
+          { at: at(11, 59).toISOString(), role: 'her', text: '对，跑完再重启，lib 改完必须 deploy。' },
+        ].map((x) => JSON.stringify(x)).join('\n') + '\n', 'utf8')
+
+        const r1 = await runOnce({ root: tRoot, config: tCfg, now: at(12), log: () => {} })
+        assert.equal(r1.gate.ok, true)
+        assert.equal(r1.delivery.dryRun, true)
+        assert.ok(r1.delivery.pack.includes('部署脚本是在 DSH 关闭时运行的'), '搭得上的素材应该入包')
+        assert.ok(!r1.delivery.pack.includes('24 小时书店'), '不搭的素材不该凑数入包')
+        assert.ok((await readFile(topicPath(tRoot), 'utf8')).includes('session-topic'), '话题快照要落盘')
+
+        // staging 被蒸馏清掉后，快照还能兜住「当下在聊什么」
+        await writeFile(staging, '', 'utf8')
+        const r2 = await runOnce({ root: tRoot, config: tCfg, now: at(12, 10), log: () => {} })
+        assert.equal(r2.gate.ok, true)
+        assert.ok(r2.delivery.pack.includes('部署脚本'), 'staging 清空后应回退到话题快照')
+
+        // 快照超过一天就不是「当下」了，不能拿来给投递背书
+        const snap = JSON.parse(await readFile(topicPath(tRoot), 'utf8'))
+        snap.at = new Date(at(12).getTime() - 48 * 3600000).toISOString()
+        await writeFile(topicPath(tRoot), JSON.stringify(snap), 'utf8')
+        const rOld = await runOnce({ root: tRoot, config: tCfg, now: at(12, 15), log: () => {} })
+        assert.equal(rOld.gate.reason, 'no-topic')
+        assert.equal(rOld.delivery.skipped, 'no-topic')
+
+        // 换成没有话题的目标：这一跳不投，也不许拿不相干的素材凑数
+        await saveConfig(tRoot, {
+          targetSessionId: 'session-other', refillBelow: 1, minIntervalHours: 999,
+        })
+        const tCfgOther = await loadConfig(tRoot, { reload: true })
+        const r3 = await runOnce({ root: tRoot, config: tCfgOther, now: at(12, 20), log: () => {} })
+        assert.equal(r3.gate.reason, 'no-topic')
+        assert.equal(r3.delivery.skipped, 'no-topic')
+
+        // 有话题但一条都对不上：off-topic，同样不投也不去闲逛烧模型
+        await writeFile(join(paths(tRoot).staging, 'session-other.jsonl'),
+          JSON.stringify({ at: at(12, 15).toISOString(), role: 'user', text: '今天中午吃什么好' }) + '\n',
+          'utf8')
+        const r4 = await runOnce({ root: tRoot, config: tCfgOther, now: at(12, 30), log: () => {} })
+        assert.equal(r4.gate.reason, 'off-topic')
+        assert.equal(r4.delivery.skipped, 'off-topic')
+        assert.equal(gateAllowsWander(r4.gate), false)
+      } finally {
+        await rm(tRoot, { recursive: true, force: true })
       }
     }
 

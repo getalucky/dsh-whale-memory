@@ -25,6 +25,7 @@ const { preloadSources, sourceOfSession, resetSourceCache } = await import('../l
 const { registerIngest, flush, readStagingLines, lastActive } = await import('../lib/ingest.js')
 const { distillSession, extractCandidates } = await import('../lib/distill.js')
 const { registerInjection, resetCaches, personaSnapshot, MEMORY_SECTION, PERSONA_SECTION } = await import('../lib/inject.js')
+const { preloadTrust } = await import('../lib/trust.js')
 const { renderRules } = await import('../lib/skeleton.js')
 const { registerTools } = await import('../lib/tools.js')
 
@@ -33,6 +34,8 @@ const ok = (name) => { pass += 1; console.log('  ok', name) }
 
 try {
   await ensureDirs(root)
+  // 生产入口启动时会先预载信任；注入层按 fail-closed 设计，冷缓存不放行。
+  await preloadTrust(root)
   const pre = await preloadSources()
   assert.equal(pre.state, 'none', JSON.stringify(pre))
 

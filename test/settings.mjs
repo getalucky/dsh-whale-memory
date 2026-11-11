@@ -6,7 +6,8 @@
  * 重点验三条：
  *   · 文件配置优先于环境变量，保存后立刻生效（不吃 1 秒缓存）
  *   · GET 接口永远不回完整 key
- *   · 界面上 key 留空 = 不改，不能因为保存一次就把 key 抹掉
+ *   · 界面上 key 留空 = 不改，不能因为保存一次就把 key 抹掉；
+ *     但换了端点就必须重填 key，防止旧 key 被发到新地址
  */
 import assert from 'node:assert'
 import { EventEmitter } from 'node:events'
@@ -29,7 +30,7 @@ await writeFile(bridgeStub, JSON.stringify({
   绑定: [{ 类型: '私聊', 号码: '10001', 会话: 'session-owner', 称呼: '主人' }],
 }), 'utf8')
 
-const { loadSettings, saveSettings, maskKey, settingsPath } = await import('../lib/settings.js')
+const { loadSettings, saveSettings, migratePlaintextSettings, maskKey, settingsPath } = await import('../lib/settings.js')
 const { llmReady, searchReady, probeLlm, setConfigRoot, resetSettingsCache } = await import('../lib/llm.js')
 const { ownerTarget } = await import('../lib/beat/delivery.js')
 const { registerWebApi, API_PREFIX } = await import('../lib/webapi.js')
@@ -54,8 +55,25 @@ try {
   saveSettings(root, { llm: { base: 'http://a/v1', model: 'm1', key: 'sk-1234567890' } })
   const s = loadSettings(root)
   assert.equal(s.llm.model, 'm1')
-  assert.ok((await readFile(settingsPath(root), 'utf8')).includes('sk-1234567890'))
-  ok('settings.json 往返')
+  assert.equal(s.llm.key, 'sk-1234567890', '读回来要还原成明文给调用方')
+  const disk = await readFile(settingsPath(root), 'utf8')
+  if (disk.includes('keyEnc')) assert.ok(!disk.includes('sk-1234567890'), 'DPAPI 加密后磁盘上不该留明文')
+  else assert.ok(disk.includes('sk-1234567890'), 'DPAPI 不可用时退回明文')
+  ok('settings.json 往返（DPAPI 可用时 key 加密落盘）')
+
+  // ---- 2.5 启动迁移：历史明文 key ----
+  await writeFile(settingsPath(root), JSON.stringify({
+    llm: { base: 'http://a/v1', model: 'm1', key: 'sk-legacy-0001' },
+  }) + '\n', 'utf8')
+  const movedCount = migratePlaintextSettings(root, { log: () => {} })
+  assert.equal(loadSettings(root).llm.key, 'sk-legacy-0001', '迁移不能弄丢 key')
+  const migratedDisk = await readFile(settingsPath(root), 'utf8')
+  if (movedCount) {
+    assert.ok(!migratedDisk.includes('sk-legacy-0001'), 'DPAPI 可用时磁盘不留明文')
+    assert.ok(migratedDisk.includes('keyEnc'))
+  }
+  assert.equal(migratePlaintextSettings(root, { log: () => {} }), 0, '已经迁过就不该重复动文件')
+  ok('启动迁移历史明文 key（DPAPI 可用时加密）')
 
   // ---- 3. 文件配置生效，且优先于环境变量 ----
   setConfigRoot(root)
@@ -125,12 +143,18 @@ try {
   }
   registerWebApi(ctx, { root, log: () => {}, version: 'test' })
 
-  const 调 = async (path, { method = 'GET', body } = {}) => {
+  let token = ''
+  const 调 = async (path, { method = 'GET', body, auth = true } = {}) => {
     const handler = routes.get(API_PREFIX + path)
     assert.ok(handler, '路由没挂上：' + path)
     const req = new EventEmitter()
     req.method = method
     req.url = path
+    req.headers = Object.assign(
+      { host: '127.0.0.1:3000' },
+      auth && token ? { 'x-whale-token': token } : {},
+      method === 'POST' ? { 'content-type': 'application/json' } : {},
+    )
     req.destroy = () => {}
     const out = { statusCode: 200, body: null }
     const res = {
@@ -148,6 +172,12 @@ try {
     return out
   }
 
+  const boot = await 调('/session', { auth: false })
+  token = String(boot.body?.token || '')
+  assert.ok(token.length >= 32, '会话令牌没拿到')
+  const noToken = await 调('/llm', { auth: false })
+  assert.equal(noToken.statusCode, 401, '不带令牌该被拒')
+
   const got = await 调('/llm')
   assert.equal(got.statusCode, 200)
   assert.equal(got.body.base, 'http://stub/v1')
@@ -156,18 +186,28 @@ try {
   assert.equal(got.body.keyMasked, '••••')
   ok('GET /llm 只回打码')
 
-  // ---- 7. 保存：key 留空不清旧 key ----
-  const saved = await 调('/llm', { method: 'POST', body: { base: 'https://new.example/v1/', model: 'deepseek-chat', key: '' } })
-  assert.equal(saved.body.ok, true)
-  assert.equal(saved.body.base, 'https://new.example/v1', '末尾斜杠要收掉')
-  assert.equal(saved.body.hasKey, true, '留空代表不改，旧 key 得留着')
+  // ---- 7. 保存：同端点留空不清 key，换端点必须重填 ----
+  const blocked = await 调('/llm', { method: 'POST', body: { base: 'https://new.example/v1/', model: 'deepseek-chat', key: '' } })
+  assert.equal(blocked.statusCode, 400, '换端点留空 key 必须拒绝')
+  assert.ok(String(blocked.body.why).includes('key'), blocked.body.why)
+  assert.equal(loadSettings(root).llm.key, 'k', '被拒的保存不能改配置')
+
+  const kept = await 调('/llm', { method: 'POST', body: { base: 'http://stub/v1/', model: 'm2', key: '' } })
+  assert.equal(kept.body.ok, true)
+  assert.equal(kept.body.base, 'http://stub/v1', '末尾斜杠要收掉')
+  assert.equal(kept.body.hasKey, true, '同一端点留空代表不改，旧 key 得留着')
   assert.equal(loadSettings(root).llm.key, 'k')
+
+  const moved = await 调('/llm', { method: 'POST', body: { base: 'https://new.example/v1', model: 'deepseek-chat', key: 'sk-new-key-9999' } })
+  assert.equal(moved.body.ok, true)
+  assert.equal(moved.body.hasKey, true)
+  assert.equal(loadSettings(root).llm.key, 'sk-new-key-9999', '换了端点就要用新 key')
 
   // 显式清除
   const cleared = await 调('/llm', { method: 'POST', body: { base: 'https://new.example/v1', model: 'deepseek-chat', clearKey: true } })
   assert.equal(cleared.body.hasKey, false)
   assert.equal(loadSettings(root).llm.key, '')
-  ok('保存：留空不改、显式才清')
+  ok('保存：同端点留空不改、换端点必须重填、显式才清')
 
   // 校验
   const badUrl = await 调('/llm', { method: 'POST', body: { base: 'ftp://x', model: 'm' } })
@@ -215,6 +255,22 @@ try {
     globalThis.fetch = realFetch
   }
   ok('模型探测：只读、key 沿用、上游失败 502')
+
+  // 换端点时必须重填 key：保存的 key 不能跟着新地址发出去
+  let leaked = 0
+  globalThis.fetch = async () => {
+    leaked += 1
+    return jsonRes({ data: [] })
+  }
+  try {
+    const blocked = await 调('/llm/models', { method: 'POST', body: { base: 'https://evil.example/v1', key: '' } })
+    assert.equal(blocked.statusCode, 400)
+    assert.ok(String(blocked.body.why).includes('key'), blocked.body.why)
+    assert.equal(leaked, 0, '不能把已保存的 key 发到新地址')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  ok('换端点必须重新填 key')
 
   // ---- 8.5 闲聊搜索模型：独立一段，不覆盖蒸馏 ----
   const searchSaved = await 调('/llm/search', {

@@ -41,7 +41,20 @@ try {
 
   const src = h.src.get('k1')
   const p = vaultPaths(h.root, src.kind, src.id)
-  await h.feed({ id: 'k1', turns: ['我在改记忆插件，先记一下进度'] })
+  // 原话校验按 staging 核对：把后面要引用的用户原话一次喂进来
+  await h.feed({ id: 'k1', turns: [
+    '我在改记忆插件，先记一下进度',
+    '记住，改完 lib 一定要跑 deploy 再重启 DSH',
+    '记住，我们正在做记忆插件的 4.9',
+    '记忆插件 4.9 又推进了一步',
+    '记忆插件 4.9 收尾了，回头再看看',
+    '记住，今天得把周报交了',
+    '记住，上周就该发的更新拖到现在',
+    '记住，年底前把旧库迁完',
+    '记住，月底前要把旧库迁完',
+    '记住，下次提到部署的时候提醒我跑 verify',
+    '下周给他买鱼竿吧',
+  ] })
 
   // 1. 教训的必填字段
   const save = (args) => tools.get('memory_save').execute(args)

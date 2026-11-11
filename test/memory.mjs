@@ -5,7 +5,7 @@
  * 对应「现存问题清单」第 3、4、5、8、9、10、12 条。
  */
 import assert from 'node:assert'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, appendFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -16,6 +16,7 @@ const {
   slotOf, withWriteLock, paths,
 } = await import('../lib/store.js')
 const { renderMemory } = await import('../lib/inject.js')
+const { renderSkeleton } = await import('../lib/skeleton.js')
 const { buildMembers } = await import('../lib/profile.js')
 const { redactText } = await import('../lib/redact.js')
 const { registerTools } = await import('../lib/tools.js')
@@ -129,6 +130,59 @@ try {
   const out2 = renderMemory(afterCorrect)
   assert.ok(!out2.includes('9点上班'), out2)
   ok('memory_correct 取代旧说法')
+
+  // 13. 常驻速览只给最近 + 高权重几条，不再按类目铺全量目录
+  const stamp = (n) => new Date(Date.now() - n * 86400000).toISOString()
+  const skScope = { kind: 'private', id: 'skeleton', profile: { summary: '' }, items: [] }
+  for (let i = 0; i < 12; i++) {
+    skScope.items.push({
+      id: `m_sk${String(i).padStart(2, '0')}`,
+      text: `第${i}条记忆的完整内容，用来验证速览不会把整库都铺开`,
+      kind: 'fact',
+      state: 'active',
+      conf: 0.6,
+      weight: i === 2 ? 0.95 : 0.1 + i * 0.01,
+      created: stamp(12 - i),
+      lastHit: stamp(12 - i),
+      hits: 0,
+    })
+  }
+  const sk = renderSkeleton(skScope, { maxChars: 700, version: '1' })
+  assert.ok(sk.includes('共 12 条'), sk)
+  assert.ok(sk.includes('第11条记忆'), '最近的条目要能看到：\n' + sk)
+  assert.ok(sk.includes('第2条记忆'), '高权重的老条目也要能看到：\n' + sk)
+  assert.ok(!sk.includes('第0条记忆'), '又老又轻的条目不该常驻：\n' + sk)
+  assert.ok(sk.includes('按需查'), sk)
+  assert.ok(sk.length <= 700, `超预算：${sk.length}`)
+  ok('速览只给最近 + 高权重，其余按需检索')
+
+  // 群聊手动记：speaker 从原话所在的那条消息取，不拿绑定称呼「群里的人」顶上
+  lastActive.sessionId = 's-group-said'
+  lastActive.at = Date.now()
+  lastActive.scope = { kind: 'group', id: '123456789', label: '群 123456789', addr: '群里的人' }
+  await mkdir(paths(root).staging, { recursive: true })
+  await appendFile(join(paths(root).staging, 's-group-said.jsonl'), JSON.stringify({
+    at: new Date().toISOString(), role: 'user', speaker: '陆小鱼', qq: '10001',
+    text: '连情绪系统和月经期都要往 AI 里塞',
+  }) + '\n', 'utf8')
+  const save = tools.find((t) => t.name === 'memory_save')
+  const gsaved = await save.execute({
+    text: '陆小鱼认为往AI里塞情绪系统和月经期很离谱',
+    source_quote: '连情绪系统和月经期都要往 AI 里塞',
+  })
+  assert.equal(gsaved.ok, true, JSON.stringify(gsaved))
+  const gscope = await loadScope(root, 'group', '123456789')
+  const gitem = gscope.items.find((x) => x.id === gsaved.id)
+  assert.equal(gitem.speaker, '陆小鱼', '群里的发言人要从原话里取：' + JSON.stringify(gitem))
+  ok('群聊手动记忆：发言人取自原话，不用会话称呼')
+
+  // 泛称不进成员表，也不在注入里冒充发言人
+  const ph = { scope: 'group:ph', kind: 'group', id: 'ph', label: '群 ph', profile: { summary: '' }, items: [] }
+  addItem(ph, { text: '爹说月经期数据后面可以做', speaker: '群里的人', source: 'tool' })
+  addItem(ph, { text: '小鱼说想看海', speaker: '小鱼', source: 'tool' })
+  assert.ok(!buildMembers(ph).some((m) => m.name === '群里的人'), JSON.stringify(buildMembers(ph)))
+  assert.ok(!renderMemory(ph).includes('群里的人'), renderMemory(ph))
+  ok('泛称不进成员表 / 注入')
 
   console.log(`\n全部通过：${pass} 项`)
 } catch (e) {

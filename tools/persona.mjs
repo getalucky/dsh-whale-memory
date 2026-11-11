@@ -36,6 +36,17 @@ try {
       (a.publishedThisWeek ? `本周已发布，下次 ${a.nextPublishAt}` : '本周未发布') +
       `${a.autoPublished ? ` · 已自动发布 ${a.autoPublished} 次` : ''}`)
     if (a.lastRunAt) console.log(`上次提案：${a.lastRunAt}`)
+    const last = (s.recentRuns || [])[0]
+    if (last) {
+      const 结论 = last.applied > 0
+        ? `发布 v${last.version} · 新增 ${last.applied} 条`
+        : last.proposed ? `只出提案（候选 ${last.additions || 0} 条）` : '没跑成'
+      console.log(`上次结果：${结论}${last.why ? ` · ${last.why}` : ''}`)
+    }
+    if (s.proposal) {
+      const n = (s.proposal.additions || []).length
+      console.log(`待确认提案：${n} 条${s.proposal.at ? `（生成于 ${s.proposal.at}）` : ''}`)
+    }
   } else if (cmd === 'probe') {
     const r = await probePersona(root)
     console.log(`探针 ${r.passed}/${r.total}`)

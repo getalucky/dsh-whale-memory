@@ -9,7 +9,7 @@ import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { extractTriples, buildGraph, saveGraph, loadGraph, neighbors, renderGraph, topNodes } from '../lib/graph.js'
+import { extractTriples, buildGraph, saveGraph, loadGraph, neighbors, renderGraph, topNodes, mergeTriples } from '../lib/graph.js'
 import { registerWebApi, API_PREFIX } from '../lib/webapi.js'
 import { emptyScope, saveScope, paths, ensureDirs } from '../lib/store.js'
 
@@ -86,6 +86,22 @@ t('长句不当实体', () => {
   eq(r, [])
 })
 
+t('问句不拆成「A 是 B」', () => {
+  eq(extractTriples('以后是不是还得配个产检系统'), [])
+  eq(extractTriples('用户询问是否需要更换LLM蒸馏模型'), [])
+})
+
+t('「不喜欢」不被拆成「不…喜欢」', () => {
+  const r = extractTriples('不列颠的鱼不喜欢别人称呼其为姐姐')
+  eq(r[0].s, '不列颠的鱼')
+  eq(r[0].rel, '不喜欢')
+})
+
+t('自称是单独成关系', () => {
+  const r = extractTriples('云玥的汐眠自称是云玥的鱼')
+  eq([r[0].s, r[0].rel, r[0].o], ['云玥的汐眠', '自称是', '云玥的鱼'])
+})
+
 // ---- 建图 ----
 const scopes = [
   { ...emptyScope('private', '1', '私聊 A'), items: [
@@ -109,6 +125,36 @@ t('重复关系合成一条边并加权', () => {
   const e = g.edges.filter((x) => x.rel === '上班@')
   eq(e.length, 1)
   ok(e[0].weight > 1.5, '权重没涨：' + e[0].weight)
+})
+
+t('LLM 三元组合进图谱', () => {
+  const g = buildGraph(scopes, [
+    { item: 'a1', s: '老爹', sType: 'person', rel: '养了', o: '小白', oType: 'thing' },
+  ])
+  const e = g.edges.find((x) => x.rel === '养了')
+  ok(e, '没合进图谱')
+  eq(e.origin, 'llm')
+  ok(g.nodes.some((n) => n.name === '小白'), '宾语节点没建出来')
+})
+
+t('规则和 LLM 抽到同一条关系不重复加权', () => {
+  const one = [{
+    ...emptyScope('private', '9', '单条'),
+    items: [{ id: 'z1', text: '老爹在D盘上班', kind: 'fact', state: 'active', created: '2026-10-30T03:00:00Z' }],
+  }]
+  const g = buildGraph(one, [{ item: 'z1', s: '老爹', sType: 'person', rel: '上班@', o: 'D盘', oType: 'place' }])
+  eq(g.edges.find((x) => x.rel === '上班@').weight, 1)
+})
+
+t('三元组按条目去重，checked 标记可重复合并', () => {
+  const a = mergeTriples([], [
+    { item: 'm1', s: 'A', rel: '喜欢', o: 'B', at: 'x' },
+    { item: 'm1', checked: true, at: 'x' },
+  ])
+  eq(a.length, 2)
+  const b = mergeTriples(a, [{ item: 'm1', s: 'A', rel: '喜欢', o: 'B', at: 'y' }])
+  eq(b.length, 2)
+  eq(b.find((x) => x.rel === '喜欢').at, 'y')
 })
 
 t('1 跳邻居', () => {
@@ -149,13 +195,46 @@ t('保存后能读回', () => { eq(g1.nodes.length, g0.nodes.length); eq(g1.edge
 const routes = new Map()
 const fakeCtx = { webServer: { register({ path, handler }) { routes.set(path, handler); return () => routes.delete(path) } } }
 const api = registerWebApi(fakeCtx, { root, log: () => {}, version: '0.2.0' })
-t('注册了 24 条路由', () => eq(routes.size, 24))
+t('注册了 26 条路由', () => eq(routes.size, 26))
 
-const call = (p) => new Promise((resolve) => {
+let token = ''
+const call = (p, { method = 'GET', body, headers = {}, auth = true } = {}) => new Promise((resolve) => {
+  const payload = body == null ? '' : (typeof body === 'string' ? body : JSON.stringify(body))
+  const req = {
+    method,
+    url: API_PREFIX + p,
+    headers: Object.assign(
+      { host: '127.0.0.1:3000' },
+      auth && token ? { 'x-whale-token': token } : {},
+      headers,
+    ),
+    on(ev, fn) {
+      if (ev === 'data' && payload) fn(Buffer.from(payload))
+      if (ev === 'end') fn()
+      return req
+    },
+  }
   const chunks = []
-  const res = { statusCode: 0, setHeader() {}, end(s) { chunks.push(s); resolve(JSON.parse(chunks.join(''))) } }
-  routes.get(API_PREFIX + p)({ url: API_PREFIX + p }, res)
+  const res = {
+    statusCode: 0,
+    setHeader() {},
+    end(s) {
+      chunks.push(s)
+      const out = JSON.parse(chunks.join('') || '{}')
+      out.__status = this.statusCode
+      resolve(out)
+    },
+  }
+  routes.get(API_PREFIX + p)(req, res)
 })
+
+const boot = await call('/session', { auth: false })
+token = String(boot.token || '')
+t('先取会话令牌', () => { eq(boot.ok, true); ok(token.length >= 32, '令牌太短') })
+const noToken = await call('/state', { auth: false })
+t('不带令牌被拒', () => { eq(noToken.__status, 401) })
+const crossSite = await call('/state', { headers: { origin: 'http://evil.example' } })
+t('跨站 Origin 被拒', () => { eq(crossSite.__status, 403) })
 
 const state = await call('/state')
 t('/state 返回分片', () => { eq(state.ok, true); ok(state.scopes.length >= 1, '没有分片') })
@@ -165,13 +244,25 @@ const audit = await call('/audit')
 t('/audit 返回数组', () => { eq(audit.ok, true); ok(Array.isArray(audit.rows)) })
 const obs = await call('/obs')
 t(' /obs 返回人格/信任/分片', () => { eq(obs.ok, true); ok(obs.persona && obs.trust, '缺 persona/trust'); ok(Array.isArray(obs.vault), 'vault 不是数组') })
-const refresh = await call('/refresh')
+const formPost = await call('/refresh', { method: 'POST' })
+t('POST 非 JSON 被拒', () => { eq(formPost.__status, 415) })
+const refresh = await call('/refresh', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: {},
+})
 t('/refresh 能重建', () => { eq(refresh.ok, true) })
 const diary = await call('/diary')
 t('/diary 返回配置与列表', () => {
   eq(diary.ok, true)
   ok(Array.isArray(diary.days), 'days 不是数组')
   ok(diary.config && Number.isFinite(Number(diary.config.hour)), '缺 config')
+})
+const health = await call('/health')
+t('/health 返回体检单', () => {
+  eq(health.ok, true)
+  ok(health.totals && Number.isFinite(health.totals.live), '缺 totals.live')
+  ok(Array.isArray(health.scopes), 'scopes 不是数组')
 })
 
 api.dispose()

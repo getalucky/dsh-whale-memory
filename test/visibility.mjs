@@ -46,6 +46,8 @@ assert.equal(writableScope(私A, 公共), false, '私聊不能改公共池')
 assert.equal(writableScope(本机, 公共), true, '只有本机能改公共池')
 assert.equal(writableScope(群A, 群A), true)
 assert.equal(writableScope(群A, 群B), false)
+assert.equal(writableScope(null, 群A), false, '来源不明时写必须拒绝')
+assert.equal(writableScope(undefined, { kind: 'private', id: 'x' }), false, '来源不明时写必须拒绝')
 ok('可见性规则：群 / 私聊 / 本机 / 仓库 / 公共池')
 
 // ---- 走真实工具 ----
@@ -117,6 +119,20 @@ assert.ok(私搜公共.results.some((x) => x.scope === 'public:web'), JSON.strin
 const 私删公共 = await tools.get('memory_forget').execute({ id: 公共条目.id })
 assert.equal(私删公共.ok, false)
 ok('私聊查自己正常，能带出圈子池和公共池')
+
+// ---- 回归：群里刚有人说话，私聊这时调工具 —— 不能把私聊当群 ----
+// 宿主 execute(args, exec) 的 exec.agent 带着真实会话；以前只看「最近活跃」，
+// 私聊搜到摘要行、读正文却按群规则拒掉（2026-11-10 实盘）。
+const execOf = (caseId) => ({ agent: { session: { header: { id: h.src.get(caseId).sid } } } })
+await h.say('gp', '群里又有人说话了')
+// 此刻「最近活跃」是群；私聊带自己的 exec 调用，应该读得到自己的正文
+const 私读exec = await tools.get('read_memory').execute({ id: 私条目[0].id }, execOf('pv'))
+assert.ok(私读exec.ok, JSON.stringify(私读exec))
+// 同一个 id 换群的身份调用，必须拒
+const 群读exec = await tools.get('read_memory').execute({ id: 私条目[0].id }, execOf('gp'))
+assert.equal(群读exec.ok, false, JSON.stringify(群读exec))
+assert.ok(/群会话/.test(群读exec.why), 群读exec.why)
+ok('工具按自己的会话判可见性，不受别的会话活跃影响')
 
 await h.dispose()
 console.log(`\n全部通过：${pass} 项`)

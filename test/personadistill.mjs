@@ -39,13 +39,25 @@ try {
   const secret = addItem(sc, { text: '我的 key 是 sk-abcdefghijklmnopqrstuvwxyz', kind: 'fact' })
   await saveScope(root, sc)
 
+  // 群里的话是别人的，仓库分片会随 git 分享，都不能拿来训练人设
+  const group = emptyScope('group', '99')
+  const g = addItem(group, { text: '以后都叫我老大', kind: 'pref', conf: 0.8 })
+  await saveScope(root, group)
+
+  const local = emptyScope('local', 'web')
+  const l = addItem(local, { text: '以后先给结论，少啰嗦', kind: 'pref', conf: 0.8 })
+  await saveScope(root, local)
+
   const sample = await samplePersona(root)
   const ids = sample.samples.map((x) => x.id)
   assert.ok(ids.includes(a.id) && ids.includes(b.id), JSON.stringify(ids))
+  assert.ok(ids.includes(l.id), '本机会话是本人独占的，应该进样本')
+  assert.ok(!ids.includes(g.id), '群聊样本不该进人设')
+  assert.ok(!sample.knownIds.has(g.id), '群聊整片都不该参与证据核对')
   assert.ok(!ids.includes(cmd.id), '命令不该进样本')
   assert.ok(!ids.includes(secret.id), '凭据不该进样本')
   assert.ok(sample.knownIds.has(cmd.id), 'knownIds 仍是全量，用来核对证据是否存在')
-  ok('采样：命令 / 凭据被挡，画像样本保留')
+  ok('采样：只取本人独占分片，命令 / 凭据被挡')
 
   // 确定性审查：事件 / 日期 / 号码 / 假 id / 超预算
   const base = { knownIds: sample.knownIds, current: '', tokens: 0, limit: 1200 }

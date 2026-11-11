@@ -19,6 +19,7 @@ import { registerIngest, flush } from '../lib/ingest.js'
 import { registerTools } from '../lib/tools.js'
 import { registerInjection, startMemoryRefresh, resetCaches } from '../lib/inject.js'
 import { preloadSources, resetSourceCache } from '../lib/source.js'
+import { preloadTrust, resetTrustCache, trust } from '../lib/trust.js'
 import { projectOf, resetNamespaceCache, listProjectRoots } from '../lib/namespace.js'
 
 let pass = 0
@@ -33,6 +34,7 @@ process.env.DSH_MEMORY_HOME = root
 process.env.DSH_QQ_BRIDGE_CONFIG = join(base, 'no-bridge.json')
 process.env.DSH_MEMORY_PROJECT_SCOPE = 'on'
 await ensureDirs(root)
+await preloadTrust(root)
 resetSourceCache()
 await preloadSources()
 
@@ -114,6 +116,7 @@ try {
   ok('仓库会话检索/读取能命中仓库库')
 
   // 同一个会话里写个人偏好：仍然落个人库，检索时两个根都能看到
+  await say('s-local-1', repo, '记住，我这边一律用深色主题')
   const globalSave = await tools.get('memory_save').execute({
     text: '用户喜欢深色主题',
     kind: 'pref',
@@ -142,8 +145,8 @@ try {
   const mem = sections.find((x) => x.name === 'whale:memory')
   const text = mem.text()
   assert.ok(text.includes('本仓库记忆'), text.slice(0, 400))
-  assert.ok(text.includes('发布前必须跑'), text.slice(-400))
-  assert.ok(text.includes('记忆目录'), '个人目录骨架也要在，不能只剩仓库')
+  assert.ok(text.includes('当准备发布这个仓库时'), text.slice(-400))
+  assert.ok(text.includes('记忆速览'), '个人速览也要在，不能只剩仓库')
   assert.equal((text.match(/【记忆使用规矩】/g) || []).length, 1, '规矩段只能出一份')
   ok('注入：仓库 + 个人两段骨架，规矩段只出一次')
 
@@ -157,6 +160,42 @@ try {
   assert.equal(bad.ok, false)
   assert.ok(/不在仓库/.test(bad.why), bad.why)
   ok('不在仓库的会话写 project 直接拒写')
+
+  // ---- 仓库库未信任：读写和注入都要停 ----
+  // clone 下来的仓库会带一份 .dsh/storages；没人工确认前不能当可信记忆用
+  await mkdir(ns.root, { recursive: true })
+  await writeFile(join(ns.root, 'meta.json'), JSON.stringify({ origin: 'external' }), 'utf8')
+  resetTrustCache()
+  await say('s-local-4', repo, '在吗，看看仓库记忆')
+
+  const blocked = await tools.get('memory_save').execute({
+    text: '未信任仓库里不该写进去',
+    source_quote: '记住，这句话够八个字了吧',
+    namespace: 'project',
+  })
+  assert.equal(blocked.ok, false)
+  assert.ok(/未信任/.test(blocked.why), blocked.why)
+
+  const s3 = await tools.get('search_memory').execute({ query: '发布部署' })
+  assert.ok(!s3.results.some((x) => x.scope === ns.scope), '未信任的仓库条目不能进检索结果')
+
+  resetCaches()
+  const agent2 = {
+    session: { header: { id: 's-local-4', cwd: repo } },
+    ctx: { systemPrompt: { section(s) { sections.push(s) } } },
+  }
+  for (const fn of created) fn({ agent: agent2 })
+  await startMemoryRefresh({ root, log: () => {} }).tick()
+  const mem2 = sections.filter((x) => x.name === 'whale:memory').at(-1).text()
+  assert.ok(!mem2.includes('本仓库记忆'), '未信任的仓库骨架不能注入')
+  assert.ok(mem2.includes('记忆速览'), '个人速览不受影响')
+  ok('仓库库未信任：写入 / 检索 / 注入全部停用')
+
+  // 人工 trust 后恢复
+  await trust(ns.root)
+  const s4 = await tools.get('search_memory').execute({ query: '发布部署' })
+  assert.ok(s4.results.some((x) => x.scope === ns.scope), JSON.stringify(s4))
+  ok('仓库库 trust 后恢复检索')
 
   console.log(`\n${pass} 通过 · 0 失败`)
 } finally {

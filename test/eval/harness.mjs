@@ -22,6 +22,7 @@ import { renderMemory, RENDER_OPTS } from '../../lib/inject.js'
 import { renderMemorySection } from '../../lib/skeleton.js'
 import { searchFunnel } from '../../lib/funnel.js'
 import { preloadSources } from '../../lib/source.js'
+import { preloadTrust } from '../../lib/trust.js'
 
 /** 估算 token：中日韩字符 ≈ 1，其他字符 ≈ 1/3.5。只用于预算趋势，不当精确计费。 */
 export function estimateTokens(text) {
@@ -54,6 +55,7 @@ export async function createHarness(cases) {
   const base = await mkdtemp(join(tmpdir(), 'whale-eval-'))
   const root = join(base, 'memory')
   await ensureDirs(root)
+  await preloadTrust(root)
   process.env.DSH_MEMORY_HOME = root
 
   const bindings = []

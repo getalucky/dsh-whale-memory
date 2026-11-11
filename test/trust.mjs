@@ -13,7 +13,7 @@ import { join } from 'node:path'
 
 import { ensureDirs, loadScope, addItem, saveScope } from '../lib/store.js'
 import {
-  trustState, trust, revoke, preloadTrust, assertUsable, fingerprint,
+  trustState, trustStateSync, trust, revoke, preloadTrust, assertUsable, fingerprint,
   resetTrustCache,
 } from '../lib/trust.js'
 import { registerTools } from '../lib/tools.js'
@@ -24,10 +24,17 @@ const ok = (name) => { pass += 1; console.log('  ok', name) }
 const root = await mkdtemp(join(tmpdir(), 'whale-trust-'))
 try {
   await ensureDirs(root)
+  resetTrustCache()
+  const cold = trustStateSync(root)
+  assert.equal(cold.usable, false, '缓存没热时不能放行')
+  assert.equal(cold.pending, true)
+  ok('冷启动同步门禁默认不可信')
+
   let s = await trustState(root, { recheck: true })
   assert.equal(s.origin, 'local')
   assert.ok(s.usable)
   assert.ok((await assertUsable(root)).ok)
+  assert.equal(trustStateSync(root).usable, true, '预载后同步门禁应放行本地库')
   ok('本地库：默认可用')
 
   // 模拟外来库
@@ -60,6 +67,7 @@ try {
   s = await preloadTrust(root)
   assert.equal(s.usable, false)
   assert.ok(s.drift)
+  assert.equal(trustStateSync(root).usable, false, '漂移撤销后同步门禁也要立刻拒绝')
   ok('指纹漂移：自动撤销信任')
 
   // 重新信任，然后我们自己的写入不该掉信任
@@ -70,6 +78,7 @@ try {
   s = await preloadTrust(root)
   assert.ok(s.usable, JSON.stringify(s))
   assert.ok(!s.drift)
+  assert.equal(trustStateSync(root).usable, true, '自己的写入后同步门禁不能误判')
   ok('自己的写入刷新指纹，不掉信任')
 
   // git 仓库里的库：即使有 meta 也按外部处理

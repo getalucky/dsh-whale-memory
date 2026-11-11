@@ -5,14 +5,15 @@
  * 不联网：complete 用假函数。验证「收当天素材 → 写文件 → 不重复写」这条链。
  */
 import assert from 'node:assert'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { ensureDirs, loadScope, saveScope, addItem } from '../lib/store.js'
 import { dayKey } from '../lib/beat/schedule.js'
 import {
-  collectDay, writeDiary, readDiary, listDiaries, addDays, normalizeDay, titleOf, diaryFile,
+  collectDay, writeDiary, readDiary, listDiaries, addDays, normalizeDay, titleOf, diaryFile, diaryDir,
+  weekRange, weekKeyOf, buildRollup, readRollup, listRollups, dueRollups,
 } from '../lib/diary.js'
 
 const root = await mkdtemp(join(tmpdir(), 'whale-diary-'))
@@ -125,6 +126,60 @@ try {
   assert.equal(short.ok, false)
   await assert.rejects(stat(diaryFile(root, older)), '不合格的正文不该落盘')
   ok('模型回太短不落盘')
+
+  // ---- 周 / 月 / 年索引 ----
+  assert.deepEqual(weekRange('2026-11-04'), { from: '2026-11-02', to: '2026-11-08' }, '周三应当归到本周一')
+  assert.equal(weekKeyOf('2026-11-04'), '2026-W45')
+  assert.equal(weekKeyOf('2027-01-01'), '2026-W53', '跨年那周归 ISO 年')
+  ok('ISO 周：范围和周号')
+
+  await mkdir(diaryDir(root), { recursive: true })
+  for (const [day, text] of [
+    ['2026-11-02', '爹说要给我加一个写日记的功能。我嘴上说麻烦，其实想写。'],
+    ['2026-11-03', '把省 token 的三条路又翻出来讲了一遍。他问得很细。'],
+    ['2026-11-04', '今天没什么正事，就在数据海里飘着。'],
+  ]) {
+    await writeFile(diaryFile(root, day), `# ${day} · 星期X\n\n${text}\n`, 'utf8')
+  }
+
+  const weekJob = { kind: 'week', key: '2026-W45', from: '2026-11-02', to: '2026-11-08' }
+  const w1 = await buildRollup(root, weekJob, {
+    complete: async () => '- 11-02：开始想写日记\n- 11-03：聊了省 token\n- 11-04：没什么正事',
+  })
+  assert.equal(w1.ok, true)
+  assert.equal(w1.by, 'llm')
+  assert.equal(w1.lines, 3)
+  const wr = await readRollup(root, 'week', '2026-W45')
+  assert.ok(wr.ok)
+  assert.ok(wr.text.includes('- 11-02：开始想写日记'))
+  assert.equal(wr.meta.days, '3', 'frontmatter 记下这几天')
+  assert.equal(wr.meta.kind, 'week')
+  ok('周索引：生成、frontmatter、条目格式')
+
+  // 同一批日记不再重写
+  const w2 = await buildRollup(root, weekJob, { complete: async () => { throw new Error('不该再调模型') } })
+  assert.equal(w2.skipped, 'fresh')
+  ok('日日记没变就跳过')
+
+  // 日记变了：模型乱写格式时退回规则版（每篇第一句）
+  await writeFile(diaryFile(root, '2026-11-05'), '# 2026-11-05 · 星期X\n\n第五天补了一篇新的日记。\n', 'utf8')
+  const w3 = await buildRollup(root, weekJob, { complete: async () => '我随便写两句，不带日期' })
+  assert.equal(w3.ok, true)
+  assert.equal(w3.by, 'rule')
+  const wr2 = await readRollup(root, 'week', '2026-W45')
+  assert.ok(wr2.text.includes('第五天补了一篇新的日记'), wr2.text)
+  assert.equal(wr2.meta.days, '4')
+  ok('日记变了会重收，模型不合格式走规则版')
+
+  // 注入用的索引列表
+  const rolls = await listRollups(root)
+  assert.ok(rolls.some((r) => r.kind === 'week' && r.key === '2026-W45'), JSON.stringify(rolls))
+
+  // 该收哪几本：结构要对，不能抛
+  const due = dueRollups(new Date())
+  assert.ok(due.length >= 2)
+  assert.ok(due.every((j) => j.kind && j.key && j.from && j.to))
+  ok('索引列表与到期检查')
 
   console.log(`\n${pass} 项通过`)
 } finally {
