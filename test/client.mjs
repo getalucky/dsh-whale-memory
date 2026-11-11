@@ -27,10 +27,11 @@ const ok = (v, m) => { if (!v) throw new Error(m || '断言失败') }
 // 假 React：只要形状对，不真渲染
 const React = {
   createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
-  useState: (v) => [v, () => {}],
+  useState: (v) => [typeof v === 'function' ? v() : v, () => {}],
   useMemo: (fn) => fn(),
   useCallback: (fn) => fn,
   useEffect: () => {},
+  useRef: (v) => ({ current: v }),
 }
 
 const registrations = []
@@ -92,6 +93,68 @@ t('apply 会注册设置页', () => {
 
 t('没 slots 服务时安静退出', () => {
   exportsObj.apply({ get: () => undefined })
+})
+
+// 页面组件是函数内部声明，正常不导出；测试时从源码尾巴补一个出口，
+// 用带状态的样例把每页真跑一遍——只在 Section 层看树，抓不到页面自己的引用错误。
+t('各页面带数据能渲染（不引用外部未定义变量）', () => {
+  const pageSrc = src.replace('exports.apply = apply', 'exports.__pages = { 总览页, 运行页, 记忆页, 审计页, 图谱页 }\n    exports.apply = apply')
+  ok(pageSrc !== src, '没找到导出标记')
+  vm.runInContext(pageSrc, sandbox, { filename: 'client-pages.js' })
+  const def = registrations[registrations.length - 1]
+  const pages = def.factory(requireStub).__pages
+
+  const 态 = {
+    ok: true,
+    version: '0.18.0',
+    label: 'v0.18.0+abc123',
+    build: { commit: 'abc123', branch: 'main', builtAt: '2026-11-11T15:00:39.030Z', dirty: false },
+    counts: { scopes: 1, items: 2 },
+    audit: [],
+    scopes: [{
+      scope: 'local:dsh', kind: 'local', id: 'dsh', label: '本机', updatedAt: '',
+      total: 2, active: 1, suggested: 1, archived: 0, superseded: 0,
+      items: [
+        { id: 'm1', text: '猫叫团子', kind: 'fact', conf: 0.8, hits: 1, merged: 0, state: 'active', score: 0.9, steps: [] },
+        { id: 'm2', text: '下周三看牙医', kind: 'commitment', state: 'suggested', score: 0.5, due: '2026-11-18', toWhom: '自己', steps: [] },
+      ],
+    }],
+  }
+  const 观察 = {
+    persona: { exists: true, version: 3, tokens: 800, limit: 1200, recentRuns: [] },
+    trust: { origin: 'local', usable: true },
+    vault: [], reads: {}, gate: {}, metrics: {}, searches: [], skips: [], deepens: [],
+  }
+  const 图 = { nodes: [{ name: '团子', type: 'thing', score: 0.9 }], edges: [] }
+  const 体检 = { ok: true, totals: { errors: 0, warnings: 0, duplicates: 0, stale: 0 }, scopes: [] }
+
+  // 只调用函数组件；hook 由假 React 兜底，effect 不跑。
+  const render = (node) => {
+    if (node == null || typeof node === 'boolean') return
+    if (typeof node === 'string' || typeof node === 'number') return
+    if (Array.isArray(node)) { node.forEach(render); return }
+    if (typeof node === 'function') { render(node({})); return }
+    if (node.type === 'F') { render(node.children); return }
+    if (typeof node.type === 'function') { render(node.type(node.props)); return }
+    render(node.children)
+    if (node.props && node.props.children) render(node.props.children)
+  }
+
+  const 用例 = [
+    ['总览页', { 态, 观察, 图, 体检 }],
+    ['运行页', { 观察 }],
+    ['记忆页', { 态, 删: () => {}, 确认: () => {} }],
+    ['审计页', { 态, 账本: null }],
+    ['图谱页', { 图, 态 }],
+  ]
+  for (const [名, props] of 用例) {
+    ok(typeof pages[名] === 'function', `没取到 ${名}`)
+    try {
+      render(pages[名](props))
+    } catch (e) {
+      throw new Error(`${名} 渲染失败：${String(e?.message ?? e)}`)
+    }
+  }
 })
 
 console.log(`\n${pass} 通过 · ${fail} 失败`)
