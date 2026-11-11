@@ -3,3 +3,6 @@ node_modules/
 test/eval/reports/
 .DS_Store
 Thumbs.db
+
+# 本地运行配置：即便有人拿仓库目录当 DSH_MEMORY_HOME，也别把 key 密文带进 git
+settings.json
