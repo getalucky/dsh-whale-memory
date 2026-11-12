@@ -56,7 +56,8 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
 
 ## 它做什么
 
-- **固定人格**：`persona.md` 挂进所有会话的 system prompt（默认全局，含人格与纪律）；注入前去掉区块标记，预算 ≤1200 tok。
+- **固定人格**：`persona.md` 挂进所有会话的 system prompt（默认全局，含人格与纪律）；注入前去掉区块标记，
+  预算默认 ≤1200 tok，可用 `DSH_MEMORY_PERSONA_TOKENS` 调到 600–2400（每轮请求都注入，调大更费上下文）。
   完整来历与旧稿在 `persona_full.md`（只做参考，不注入）。人格沉淀走 `node tools/persona.mjs propose/apply/rollback`，只改 EVOLVABLE 区块，人工确认后版本化落盘。
   蒸馏生成与审查分开：生成只看脱敏样本（命令 / 日志 / 凭据不进，按分片均衡），审查先跑确定性检查
   （证据 id 必须在库、不写事件 / 日期 / 号码 / 路径 / 凭据、不重复、不超预算），再可选调独立审查模型；
@@ -68,6 +69,24 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
   否则只落 `persona_proposal.json` 等人工 `apply`。拒绝用 `persona.mjs reject --why "原因"`，会清零连续计数，
   同一规则 30 天内不再提；回滚也清零。「每周最多一个 revision」对自动发布硬拦，人工紧急用 `apply --force`。
   关掉自动跑：`DSH_MEMORY_PERSONA_AUTO=off`（CLI 手动流程不受影响）。
+  迭代时会顺带**逐行审视旧人设**（`node tools/persona.mjs audit`，只读）：哪些偏长、哪些只是示例/
+  反例、哪些疑似重复。能安全写短的生成压缩建议；新说法跟现有某条规矩说的是同一件事
+  （同主题且字面够像，或相似度够高）、且不比旧的更长，就提议「用新的顶掉旧的」而不是继续往上堆；
+  旧行比新话长太多时不替换（那种交给压缩，避免一句短话顶掉一整段旧规矩）。
+  **预算是动态的**：可用额度 ＝ 上限 − 当前占用 + 压缩腾出的 + 替换腾出的；生成候选时就按
+  「先收拾旧人设之后」的占用做审查，不再死守当前那个 18 tok 的余额。上限仍可用
+  `DSH_MEMORY_PERSONA_TOKENS` 调，但优先靠整理腾位置，不是一味抬高天花板或一味追加。
+  压缩和替换同样要过确定性审查、独立审查模型、人工/自动闸门和前后探针比对，只是提案，
+  不会静默写盘；整行精确匹配，找不到旧行就拒绝应用，同一行不既压缩又替换。
+- **人格迭代可追溯**：每次 `propose` 的每条候选都写进 `persona_decisions.jsonl`——
+  在哪一关（采样门 / 生成 / 30 天黑名单 / 去重 / 确定性审查 / 审查模型）被留下或丢掉、
+  为什么、依据哪几条记忆，全部留档；提案文件会被下一轮覆盖，这份台账不会。
+  `node tools/persona.mjs decisions [轮数]` 翻账，`node tools/persona.mjs audit` 逐行审视旧人设（只读），
+  设置页「总览 → 运行 → 迭代判决明细 / 旧人设审视」看同一份。
+  `status` 还会说明当前为什么没迭代（差多少消息 / 还差几小时）、采样跳过按原因拆分、
+  以及实时算出的「当前余额 / 现在能压缩多少 / 整理后可用多少 / 写入时的审查基准」。
+  提案里会分别列出「压缩（旧→新）」「新增」和「替换（用哪句换掉哪句、能腾出多少 tok）」。
+  自动迭代**只改 EVOLVABLE 区块**，CORE 里的身份、纪律、底线一律不动；生成 ≠ 生效。
 - **经验与画像**：`AGENT.md`（原则 / 路径 / 坑，≤3000 字符）和 `USER.md`（偏好 / 习惯 / 红线 / 背景，≤3000 字符）
   两份独立文件，跟 `persona.md` 分家。偏好和教训在记忆**转正之后**自动沉淀（待确认的不进），
   每条带主库指针；一条经验连续两次「按它做还是失败」自动标待复核并退出注入，一次成功就恢复。
@@ -136,7 +155,7 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
 - **L3 图谱**：把记忆拆成「实体 —关系→ 实体」，落 `graph/nodes.jsonl` + `graph/edges.jsonl`；
   规则抽不到的条目交给 LLM 批量抽，结果存 `graph/triples.jsonl`（不重复进提示词）。
   目前只用于界面展示，不再塞进 system prompt（注入只留规矩段 + 骨架）
-- **界面**：DSH 设置 → 「大肥鱼记忆」，横向主菜单 + 内容页顶部子页签。顶层是总览 / 记忆 / 主动 / 模型 / 记录；总览里分「概览 / 运行」，记忆里分「分片 / 星云 / 审计」，主动里分「状态 / 素材 / 设置 / 维护」，模型里分「蒸馏 / 找素材」，记录里是「日记」。运行页看人格预算、信任状态、每分片容量、最近检索与跳过原因；记忆页可以删单条，待确认的一栏能点「确认」转正
+- **界面**：DSH 设置 → 「大肥鱼记忆」，横向主菜单 + 内容页顶部子页签。顶层是总览 / 记忆 / 主动 / 模型 / 记录；总览里分「概览 / 运行」，记忆里分「分片 / 星云 / 审计」，主动里分「状态 / 素材 / 设置 / 维护」，模型里分「蒸馏 / 找素材」，记录里是「日记」。运行页看人格预算、信任状态、每分片容量、最近检索与跳过原因，以及人格迭代的当前状态、待确认提案与每条候选的判决明细；记忆页可以删单条，待确认的一栏能点「确认」转正
 
 ## 数据长什么样
 
@@ -144,6 +163,7 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
 <DSH_HOME>/dsh-memory/
   persona.md                 人格（会话创建时快照）
   persona_changelog.md       人格变更日志（版本 / 规则 / 依据 / 探针）
+  persona_decisions.jsonl    每条候选的判决台账（哪关 / 为什么 / 依据）
   persona_archive/           人格历史版本，可 rollback
   AGENT.md                   经验（原则 / 路径 / 坑，≤3000 字符，可手改）
   USER.md                    画像（偏好 / 习惯 / 红线 / 背景，≤3000 字符，可手改）
@@ -322,7 +342,7 @@ node test/origin.mjs    # 原文指针：按指纹回溯 / 缺失退回原话 / 
 node test/skill.mjs     # 技能：必填字段 / 不进骨架 / 失败复核 / 每分片限流
 node test/build.mjs     # 构建指纹：版本对不上不拼 commit / 非 git 目录也能生成
 node test/client.mjs    # 客户端 bundle 离线冒烟
-node test/persona.mjs   # 人格闸门 + 20 项探针 + 变更日志
+node test/persona.mjs   # 人格闸门 + 探针 + 变更日志 + 旧人设审视 / 压缩 / 替换 / 动态预算
 node test/personaauto.mjs # 人格自动迭代：门槛 / 每周一次 / 连续通过 / 拒绝清零
 node test/docs.mjs      # AGENT.md / USER.md：容量门 / 去重 / 失败降级 / 注入预算
 node test/gate.mjs      # 确认闸门灰度：off / warn / enforce
@@ -354,6 +374,8 @@ $DSH_HOME/dsh-memory/        （可用 DSH_MEMORY_HOME 改到别处）
 - `DSH_MEMORY_HOME` — 记忆库根目录
 - `DSH_MEMORY_PERSONA_SCOPE` — `all`（默认，所有会话都挂人格）/ `bridge`（只挂 QQ 桥接）
 - `DSH_MEMORY_PERSONA_AUTO` — 人格自动迭代：`on`（默认，每小时检查）/ `off`（只留手动 CLI）
+- `DSH_MEMORY_PERSONA_TOKENS` — 人格预算，默认 1200，钳在 600–2400。调大能继续往 EVOLVABLE 追加，
+  但 `persona.md` 每个会话都注入一遍，等于每轮请求多带这些字
 - `DSH_MEMORY_LOCAL_SCOPE` — `on`（默认，本地会话也记）/ `off`（退回只收 QQ 桥接）
 - `DSH_MEMORY_PROJECT_SCOPE` — `on`（默认，仓库里的本地会话可挂 project 命名空间）/ `off`（只有个人库）
 - `DSH_MEMORY_GATE` — confirm 闸门灰度：`enforce`（默认）/ `warn`（放行但留记号）/ `off`（不拦）
@@ -367,7 +389,11 @@ $DSH_HOME/dsh-memory/        （可用 DSH_MEMORY_HOME 改到别处）
   （要自带联网能力）。设置页「模型 → 找素材」里选「直连搜索模型」才走这条；默认是「闲逛 agent」
   （宿主里带 `web_search` 多轮搜）。直连那条同样支持测试连通和探测模型，保存后下一跳闲逛生效
 - `DSH_MEMORY_EMBED_BASE` / `DSH_MEMORY_EMBED_KEY` / `DSH_MEMORY_EMBED_MODEL` — 可选向量端点
-  （Ollama 填 `http://127.0.0.1:11434/v1` + `bge-m3`；不配就纯词法）
+  （Ollama 填 `http://127.0.0.1:11434/v1` + `bge-m3`；不配就纯词法）。设置页「模型 → 向量」可以
+  单独填端点/Key/模型，点「探测向量模型」会自动拉 `/models` 并逐个试 `/embeddings`，把不支持的标出来。
+  配好后 `search_memory` 会把查询和候选一起算向量，与字符 n-gram 融合；端点失败自动回退词法，
+  向量缓存按正文哈希复用
+- `DSH_MEMORY_MAX_ITEMS` — 每个分片的容量上限，默认 1000（原来是 400）。到顶仍归档最冷的条目
 - `DSH_MEMORY_REVIEW_BASE` / `DSH_MEMORY_REVIEW_KEY` / `DSH_MEMORY_REVIEW_MODEL` — 可选人格审查模型；
   不填就退回主 LLM（仍是单独一次调用、独立提示词），只配主 LLM 时提案里会标 `llm(fallback)`
 
@@ -396,7 +422,7 @@ $DSH_HOME/dsh-memory/        （可用 DSH_MEMORY_HOME 改到别处）
   - 设置页只列个人库的分片，仓库库的条目在注入骨架和记忆工具里能看到；
   - `DSH_MEMORY_PROJECT_SCOPE=off` 关掉；`DSH_HOME` 内和无标记的目录不会被当成仓库。
 - 蒸馏默认规则抽取；LLM 是可选项，失败/超时一律回退规则，不会写半截结果
-- 检索默认词法（字符 n-gram）；向量也是可选项，端点不可达时静默降级
+- 检索默认词法（字符 n-gram）；配了向量端点后走混合检索（词面 + 语义），端点不可达时静默降级
 - 图谱先跑规则（在X上班 / 住在X / 喜欢X / 养了X / 我叫X / X是Y / 在<地名尾缀>），
   抽不出来的再交给 LLM 批量抽；旧记忆用 `node tools/graph-backfill.mjs --yes` 一次性补齐
   （先不加 `--yes` 是预演，只算待补数量、不请求模型）

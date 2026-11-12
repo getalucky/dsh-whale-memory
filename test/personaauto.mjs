@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import { ensureDirs, emptyScope, saveScope } from '../lib/store.js'
 import {
   propose, applyProposal, autoGate, rejectProposal, readMeta, updateMeta, parsePersona, PERSONA,
+  status, recentDecisions, readDecisions,
 } from '../lib/persona.js'
 import { autoTick, bumpMessages } from '../lib/personaloop.js'
 
@@ -91,6 +92,20 @@ try {
   assert.equal((await readMeta(root)).pendingMessages, 0)
   ok('满足门槛：生成提案但不自动发布')
 
+  // ---- 透明度：每条候选的判决都留痕，含依据与理由 ----
+  assert.ok(p1.decisions?.length >= 1, '提案里要有判决明细')
+  assert.ok(p1.decisions.some((d) => d.action === 'accepted' && d.stage === 'review' && d.why), JSON.stringify(p1.decisions))
+  assert.ok(p1.decisions.find((d) => d.action === 'accepted').evidence.length >= 1, '通过的候选要带依据记忆')
+  assert.equal(typeof p1.samples.skipReasons, 'object', '采样跳过要分原因')
+  assert.equal(typeof p1.budget.headroom, 'number', '预算要给出剩余空间')
+  const st1 = await status(root)
+  assert.ok(st1.decisions?.length >= 1, 'status 要能翻判决台账')
+  assert.ok(st1.auto.waitReason, 'status 要说明当前为什么没迭代')
+  assert.ok(st1.proposal.additions[0].refs?.length >= 1, 'status 要带依据 id')
+  const ledger = await readDecisions(root, 5)
+  assert.ok(ledger[0].rows.some((d) => d.action === 'accepted'), '台账落盘后能读回')
+  ok('透明度：判决台账 / 采样原因 / 依据 / 预算余量都可查')
+
   // ---- 人工通过：连续计数 +1 ----
   const r1 = await applyProposal(root, join(root, PERSONA.proposal))
   assert.equal(r1.streak, 1)
@@ -122,7 +137,27 @@ try {
 
   const p3 = await propose(root)
   assert.ok(!p3.additions.some((a) => /结论/.test(a.rule)), '被拒规则 30 天内不该再提')
-  ok('拒绝：同一规则 30 天内不再提')
+  assert.ok(p3.decisions.some((d) => d.stage === 'blacklist' && /30 天内/.test(d.why)),
+    '被黑名单拦掉的候选必须写明原因，不能静默丢弃：' + JSON.stringify(p3.decisions))
+  ok('拒绝：同一规则 30 天内不再提（且留痕）')
+
+  // ---- 拒绝时替换候选也进 30 天黑名单 ----
+  {
+    const rp = await mkdtemp(join(tmpdir(), 'whale-persona-reject-replace-'))
+    try {
+      await ensureDirs(rp)
+      await writeFile(join(rp, 'persona.md'), ORIGINAL, 'utf8')
+      await writeFile(join(rp, PERSONA.proposal), JSON.stringify({
+        at: new Date().toISOString(), baselineHash: '', additions: [],
+        replacements: [{ old: '说话短一点。', rule: '说话别绕弯。' }],
+      }), 'utf8')
+      const r = await rejectProposal(rp, { why: '换得不好' })
+      assert.ok(r.rules.includes('说话别绕弯。'), '替换候选也要进黑名单：' + JSON.stringify(r.rules))
+      ok('拒绝：替换候选同样记入 30 天黑名单')
+    } finally {
+      await rm(rp, { recursive: true, force: true }).catch(() => {})
+    }
+  }
 
   // ---- warn 期不自动发 ----
   await updateMeta(root, (m) => ({ ...m, lastPublishedWeek: '2000-01-03' }))
@@ -184,6 +219,62 @@ try {
     ok('手动样本门：不足 20 条明确说差多少')
   } finally {
     await rm(small, { recursive: true, force: true }).catch(() => {})
+  }
+
+  // ---- 只有整理、没有新规矩时，自动迭代也要能发布 ----
+  {
+    const cleanRoot = await mkdtemp(join(tmpdir(), 'whale-persona-cleanup-'))
+    try {
+      await ensureDirs(cleanRoot)
+      const dirty = `<!-- PERSONA:CORE:START -->\n你是测试鲸鱼。\n<!-- PERSONA:CORE:END -->\n\n<!-- PERSONA:EVOLVABLE:START -->\n不分析：他没问「为什么」「怎么办」「哪个好」，就别解释原因、别列利弊。\n<!-- PERSONA:EVOLVABLE:END -->\n\n## 纪律\n事实优先。`
+      await writeFile(join(cleanRoot, 'persona.md'), dirty, 'utf8')
+      const s = emptyScope('private', '3')
+      s.items = seed(22)
+      await saveScope(cleanRoot, s)
+      await updateMeta(cleanRoot, (m) => ({
+        ...m,
+        pendingMessages: 120,
+        lastRunAt: new Date(Date.now() - 25 * 3600e3).toISOString(),
+        lastPublishedAt: new Date(Date.now() - 25 * 3600e3).toISOString(),
+        lastPublishedWeek: '2000-01-03',
+        approvals: { streak: 3, history: [] },
+      }))
+      const a = await autoTick(cleanRoot, { gate: 'enforce' })
+      assert.equal(a.applied, 0, JSON.stringify(a))
+      assert.ok(a.compressed >= 1, '没有新规矩时也要能压缩旧人设：' + JSON.stringify(a))
+      const out = await readFile(join(cleanRoot, 'persona.md'), 'utf8')
+      assert.ok(out.includes('他没问，就别解释'), out)
+      assert.ok(out.includes('你是测试鲸鱼'), 'CORE 不能动')
+      ok('只有整理没有新增：自动迭代同样发布压缩')
+    } finally {
+      await rm(cleanRoot, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+
+  // ---- 老提案（没有 decisions 字段）也要能反推出判决 ----
+  {
+    const legacyRoot = await mkdtemp(join(tmpdir(), 'whale-persona-legacy-'))
+    try {
+      await ensureDirs(legacyRoot)
+      await writeFile(join(legacyRoot, 'persona.md'), ORIGINAL, 'utf8')
+      await writeFile(join(legacyRoot, PERSONA.proposal), JSON.stringify({
+        at: '2026-11-12T00:59:25.575Z', generator: 'rules(fallback)', reviewer: 'rules',
+        samples: { count: 12, skipped: 167, total: 324 },
+        budget: { tokens: 1182, limit: 1200 },
+        additions: [], rejected: [], warnings: ['没有新的候选；现有区块已覆盖，或证据不足'],
+      }), 'utf8')
+      const runs = await recentDecisions(legacyRoot, 3)
+      assert.equal(runs.length, 1)
+      assert.equal(runs[0].legacy, true)
+      assert.ok(runs[0].rows.some((d) => d.stage === 'sample' && /采样跳过 167/.test(d.rule)))
+      assert.ok(runs[0].rows.some((d) => d.stage === 'generator' && /蒸馏模型/.test(d.why)))
+      assert.ok(runs[0].rows.some((d) => /没有新候选/.test(d.rule)), '要说明「为什么 0 条」')
+      const st = await status(legacyRoot)
+      assert.equal(st.proposal.budget.headroom, 18, '老提案也要算出预算余量')
+      ok('老提案反推：升级后不用等下一轮就能看到理由')
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true }).catch(() => {})
+    }
   }
 
   // ---- 结构没被写坏 ----

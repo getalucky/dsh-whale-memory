@@ -98,7 +98,7 @@ t('没 slots 服务时安静退出', () => {
 // 页面组件是函数内部声明，正常不导出；测试时从源码尾巴补一个出口，
 // 用带状态的样例把每页真跑一遍——只在 Section 层看树，抓不到页面自己的引用错误。
 t('各页面带数据能渲染（不引用外部未定义变量）', () => {
-  const pageSrc = src.replace('exports.apply = apply', 'exports.__pages = { 总览页, 运行页, 记忆页, 审计页, 图谱页 }\n    exports.apply = apply')
+  const pageSrc = src.replace('exports.apply = apply', 'exports.__pages = { 总览页, 运行页, 记忆页, 审计页, 图谱页, 模型页 }\n    exports.apply = apply')
   ok(pageSrc !== src, '没找到导出标记')
   vm.runInContext(pageSrc, sandbox, { filename: 'client-pages.js' })
   const def = registrations[registrations.length - 1]
@@ -121,7 +121,44 @@ t('各页面带数据能渲染（不引用外部未定义变量）', () => {
     }],
   }
   const 观察 = {
-    persona: { exists: true, version: 3, tokens: 800, limit: 1200, recentRuns: [] },
+    persona: {
+      exists: true, version: 3, tokens: 800, limit: 1200,
+      budget: { tokens: 1182, limit: 1200, headroom: 18, compactible: 15, effective: 33, basis: 1167 },
+      audit: [
+        { i: 0, text: '不分析：他没问「为什么」「怎么办」，就别解释原因。', chars: 98, flag: 'verbose', why: '偏长（98 字）', suggestion: '去掉不含约束词的解释尾巴' },
+        { i: 1, text: '例：', chars: 2, flag: 'example', why: '示例行', suggestion: '可压成一条指引' },
+      ],
+      compressible: [{ old: '长句', rule: '短句', freed: 15, flag: 'verbose' }],
+      auto: { pendingMessages: 25, minMessages: 100, streak: 0, minStreak: 3, waitReason: '还差 75 条新消息', nextPublishAt: '2026-11-16', lastRunAt: '' },
+      recentRuns: [{ at: '2026-11-12T00:59:20.567Z', applied: 0, proposed: true, why: '没有新候选', samples: { count: 12, total: 324, skipped: 167 } }],
+      proposal: {
+        at: '2026-11-12T00:59:25.575Z', generator: 'rules(fallback)', reviewer: 'rules',
+        samples: { count: 12, skipped: 167, skipReasons: { style: 120, command: 47 } },
+        budget: { tokens: 1182, limit: 1200, headroom: 18, compactible: 15, reclaimable: 12, effective: 45, basis: 1167 },
+        additions: [{ rule: '少用 emoji', evidence: 2, refs: [{ id: 'm_1', text: '以后别用 emoji' }] }],
+        compressions: [{ old: '不分析：他没问「为什么」「怎么办」，就别解释。', rule: '不分析：他没问，就别解释。', why: '偏长；去掉不含约束词的举例列举', flag: 'verbose', freed: 15 }],
+        replacements: [{ old: 'emoji 偶尔点缀，一条最多一种。', rule: 'emoji 一条最多一个，正事不用。', why: '同一主题「emoji」', freed: 12 }],
+        audit: [
+          { i: 0, text: '不分析：他没问「为什么」「怎么办」，就别解释原因。', chars: 98, flag: 'verbose', why: '偏长（98 字）', suggestion: '去掉不含约束词的解释尾巴' },
+          { i: 1, text: '例：', chars: 2, flag: 'example', why: '示例行', suggestion: '可压成一条指引' },
+          { i: 2, text: '说话短一点。', chars: 6, flag: 'keep', why: '精简、独立的一条约束', suggestion: '' },
+        ],
+        rejected: [{ rule: '别写日期', why: '含日期 / 号码 / 路径 / 凭据' }],
+        warnings: ['人格预算只剩 18 tok'],
+      },
+      lastApplied: { at: '', rules: [], replaced: [{ old: '旧说法', rule: '新说法' }], compressed: [{ old: '长说法', rule: '短说法' }] },
+      decisions: [{
+        at: '2026-11-12T00:59:25.575Z',
+        rows: [
+          { rule: '采样跳过 120 条', action: 'dropped', stage: 'sample', why: '采样门：不是说「怎么说」的话', evidence: [] },
+          { rule: '少用 emoji', action: 'accepted', stage: 'review', why: '确定性审查通过（证据 2 条）', evidence: [{ id: 'm_1', text: '以后别用 emoji' }] },
+          { rule: 'emoji 一条最多一个', action: 'replaced', stage: 'replace', why: '替换旧规矩，腾出 12 tok', evidence: [] },
+          { rule: '不分析：他没问，就别解释。', action: 'compressed', stage: 'compact', why: '偏长；写短 15 字', evidence: [] },
+          { rule: '别写日期', action: 'dropped', stage: 'review', why: '含日期 / 号码 / 路径 / 凭据', evidence: [] },
+        ],
+      }],
+      changelog: '',
+    },
     trust: { origin: 'local', usable: true },
     vault: [], reads: {}, gate: {}, metrics: {}, searches: [], skips: [], deepens: [],
   }
@@ -146,6 +183,14 @@ t('各页面带数据能渲染（不引用外部未定义变量）', () => {
     ['记忆页', { 态, 删: () => {}, 确认: () => {} }],
     ['审计页', { 态, 账本: null }],
     ['图谱页', { 图, 态 }],
+    ['模型页', {
+      页签: '向量',
+      向量: {
+        态: { ready: true }, 表单: { base: '', model: '', key: '' },
+        改表单: () => {}, 保存: () => {}, 测试: () => {}, 探测: () => {},
+        候选: null, 探测中: false, 忙: false, 结果: null,
+      },
+    }],
   ]
   for (const [名, props] of 用例) {
     ok(typeof pages[名] === 'function', `没取到 ${名}`)
