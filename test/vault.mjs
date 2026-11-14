@@ -9,7 +9,7 @@
  *   · 条目正文里的换行 / ## 不会破坏解析
  */
 import assert from 'node:assert'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -17,7 +17,7 @@ import {
   ensureDirs, loadScope, saveScope, addItem, paths, scopeRevFile,
 } from '../lib/store.js'
 import {
-  itemToMarkdown, itemFromMarkdown, renderIndex, rebuildScope, verifyScope, vaultPaths,
+  itemToMarkdown, itemFromMarkdown, renderIndex, rebuildScope, verifyScope, vaultPaths, saveVault,
 } from '../lib/vault.js'
 
 let pass = 0
@@ -117,6 +117,26 @@ try {
   assert.ok(Buffer.byteLength(body, 'utf8') <= 32 * 1024, `副库 ${Buffer.byteLength(body, 'utf8')} 字节`)
   assert.ok(/折叠/.test(body), '超限要有折叠说明')
   ok('副库 ≤32KB，超限折叠')
+
+  // 9. 副库写失败：主库照写，pending 标记；修好后再存自动补上
+  const ps = await loadScope(root, 'private', 'pending')
+  const item = addItem(ps, { text: '主库正文第一版', kind: 'fact' })
+  await saveScope(root, ps)
+  const pp = vaultPaths(root, 'private', 'pending')
+  await rm(pp.index, { force: true })
+  await mkdir(pp.index, { recursive: true }) // 拿目录占住文件路径，逼副库写失败
+  item.text = '主库正文第二版'
+  const failed = await saveVault(root, ps)
+  assert.equal(failed.pending, true, JSON.stringify(failed))
+  assert.ok((await readFile(join(pp.full, `${item.id}.md`), 'utf8')).includes('第二版'), '主库必须已经写成功')
+  const mark = JSON.parse(await readFile(pp.pending, 'utf8'))
+  assert.ok(mark.reason, 'pending 要写失败原因')
+  await rm(pp.index, { recursive: true, force: true })
+  const fixed = await saveVault(root, ps)
+  assert.equal(fixed.pending, false, JSON.stringify(fixed))
+  assert.ok((await readFile(pp.index, 'utf8')).includes('第二版'), '副库要补上最新正文')
+  await assert.rejects(readFile(pp.pending, 'utf8'), '修好后 pending 标记要清掉')
+  ok('副库写失败留 pending，主库不丢；下一次保存自动补')
 
   console.log(`\n${pass} 通过 · 0 失败`)
 } finally {

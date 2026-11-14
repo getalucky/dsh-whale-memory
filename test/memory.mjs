@@ -48,6 +48,31 @@ try {
   assert.equal(job.state, 'active')
   ok('不同槽位不误取代')
 
+  // 口味/观点也要算矛盾：同一主题的新说法顶掉旧说法，不同主题各自保留
+  assert.equal(slotOf('老爹喜欢喝冰美式', 'pref'), 'taste:咖啡')
+  assert.equal(slotOf('老爹现在只喝拿铁', 'pref'), 'taste:咖啡')
+  assert.equal(slotOf('老爹喜欢吃辣', 'pref'), 'taste:吃辣')
+  const coffee = addItem(sc, { text: '老爹喜欢喝冰美式', kind: 'pref', conf: 0.8 })
+  const latte = addItem(sc, { text: '老爹现在只喝拿铁', kind: 'pref', conf: 0.8 })
+  assert.equal(coffee.state, 'superseded', '换了口味，旧偏好要失效')
+  assert.equal(latte.state, 'active')
+  const spicy = addItem(sc, { text: '老爹喜欢吃辣', kind: 'pref', conf: 0.8 })
+  const sweet = addItem(sc, { text: '老爹喜欢吃甜', kind: 'pref', conf: 0.8 })
+  assert.equal(spicy.state, 'active', '不同口味不该互相顶掉')
+  assert.equal(sweet.state, 'active')
+  const oldOpinion = addItem(sc, { text: '我觉得这插件挺好的', kind: 'fact', conf: 0.8 })
+  const newOpinion = addItem(sc, { text: '我觉得这插件不行了', kind: 'fact', conf: 0.8 })
+  assert.equal(oldOpinion.state, 'superseded', '观点变了，旧观点要失效')
+  assert.equal(newOpinion.state, 'active')
+  // 相似度很高的相反观点可能走合并、也可能另起一条取代；两种都要只剩新说法
+  const mergeSc = { scope: 'merge', kind: 'private', id: 'm', items: [] }
+  addItem(mergeSc, { text: '我觉得这插件挺好用', kind: 'fact', conf: 0.8 })
+  addItem(mergeSc, { text: '我觉得这插件不太好用', kind: 'fact', conf: 0.8 })
+  const liveOpinion = mergeSc.items.filter((x) => x.state === 'active')
+  assert.equal(liveOpinion.length, 1, '新旧观点不能同时活着')
+  assert.ok(liveOpinion[0].text.includes('不太好用'), '活着的是旧观点：' + liveOpinion[0].text)
+  ok('口味和观点变化：同主题取代，不同主题保留')
+
   await saveScope(root, sc)
 
   // 图谱也不该再抽被取代的旧事实
@@ -82,6 +107,22 @@ try {
   const lines = relOut.split('\n').filter((l) => l.startsWith('- ['))
   assert.ok(lines[0].includes('9点'), relOut)
   ok('相关记忆优先注入')
+
+  // 速览骨架也要认「这轮相关」：长会话中途重挑时，不能只按历史权重排
+  const relSkScope = {
+    scope: 'x',
+    items: [
+      { id: 'h1', text: '高权重甲', kind: 'fact', state: 'active', weight: 0.9 },
+      { id: 'h2', text: '高权重乙', kind: 'fact', state: 'active', weight: 0.8 },
+      { id: 'r1', text: '这轮相关丙', kind: 'fact', state: 'active', weight: 0.1 },
+    ],
+  }
+  const heavyIds = (s) => s.split('\n').filter((l) => l.startsWith('- '))
+    .map((l) => (l.includes('这轮相关丙') ? 'r1' : l.includes('高权重甲') ? 'h1' : l.includes('高权重乙') ? 'h2' : ''))
+    .filter(Boolean)
+  assert.deepEqual(heavyIds(renderSkeleton(relSkScope, { maxChars: 2000 })), ['h1', 'h2', 'r1'])
+  assert.equal(heavyIds(renderSkeleton(relSkScope, { maxChars: 2000, relevant: ['r1'] }))[0], 'r1')
+  ok('速览骨架：相关条目优先于纯权重')
 
   // 9. 群成员聚合（只用昵称，不落 QQ）
   const grp = { scope: 'group:1', kind: 'group', id: '1', items: [] }

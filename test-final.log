@@ -1,0 +1,575 @@
+
+> dsh-whale-memory@0.18.0 test
+> node test/smoke.mjs && node test/itemstate.mjs && node test/bridge-adapter.mjs && node test/vault.mjs && node test/pipeline.mjs && node test/tools.mjs && node test/funnel.mjs && node test/local.mjs && node test/confirm.mjs && node test/gate.mjs && node test/watermark.mjs && node test/kinds.mjs && node test/skill.mjs && node test/import.mjs && node test/origin.mjs && node test/namespace.mjs && node test/persona.mjs && node test/personaauto.mjs && node test/personadistill.mjs && node test/personatriage.mjs && node test/docs.mjs && node test/metrics.mjs && node test/lifecycle.mjs && node test/pin.mjs && node test/trust.mjs && node test/resume.mjs && node test/memory.mjs && node test/dedupe.mjs && node test/timeline.mjs && node test/apply.mjs && node test/graph.mjs && node test/hygiene.mjs && node test/llm.mjs && node test/models.mjs && node test/settings.mjs && node test/profile.mjs && node test/recall.mjs && node test/time.mjs && node test/client.mjs && node test/client-build.mjs && node test/visibility.mjs && node test/review.mjs && node test/health.mjs && node test/backup.mjs && node test/backupbundle.mjs && node test/inbound.mjs && node test/beat.mjs && node test/beat-host.mjs && node test/beat-lock.mjs && node test/diary.mjs && node test/build.mjs && node test/inject-policy.mjs
+
+  ok ensureDirs
+  ok 分片读写 + 去重
+  ok listScopes
+  ok 公共池分片
+  ok 候选提取
+  ok 渲染
+  ok 语义去重（换人称 + 子句）
+  ok 不相干不误合
+  ok 遗忘归档
+  ok 新鲜条目保留
+  ok 剥桥接旁白
+  ok 不动正文括号
+  ok 剥桥接脚手架
+
+全部通过：13 项
+  ok 默认死状态
+  ok 开关只影响对应状态
+  ok 集合与过滤
+
+3 通过
+  ok 换适配器后来源与拥有者照样解析
+  ok 换适配器后发言人照样拆
+  ok 注销后回到 QQ 桥
+  ok 默认 QQ 桥消息头与多行合并不变
+
+全部通过：4 项
+  ok 旧 JSON 迁移：主库 2 个文件，副库排除 superseded
+  ok 主库回读：状态 / 命中 / 取代关系都在
+  ok 改一条：主库正文 + 副库摘要同步
+  ok 删条目：主库文件挪进 archive，不物理删
+  ok 删掉 memory_index.md 能重建
+  ok 主副库一致性：文件数 = 条目数
+  ok 正文含换行 / ## / {{ 也能原样读回
+  ok 副库 ≤32KB，超限折叠
+  ok 副库写失败留 pending，主库不丢；下一次保存自动补
+
+9 通过 · 0 失败
+  ok 受控标签：高数带上级 数学/学习，不重复分词
+  ok 降维：timeline/summary/weight/confidence
+  ok 未知词退回类型标签
+  ok 预筛：寒暄/问句跳过，信号句放行
+  ok 跳过原因写审计（过短 1 / 问句 1）
+  ok 合并：新说法替换正文，旧说法进 history
+  ok 深化：近重复合并、命中累加、旧条目标 superseded
+  ok 副库超限：最冷条目归档
+  ok 副库写盘：标签与上级标签可回读
+  ok 蒸馏质量：问句不记、残句不入库、正常计划照收
+  ok 同事实合并：省略主语/日期也算同一条，模型写的没被顶掉
+
+11 通过 · 0 失败
+  ok 工具注册：search_memory / read_memory / memory_recall
+  ok 工具注册失败：返回 failed，规矩段可降级
+  ok search_memory：返回 id/摘要/标签，不返回正文
+  ok memory_recall 旧名仍可用
+  ok read_memory：默认提炼+背景，可指定完整记录
+  ok read_memory：单次 token 上限生效
+  ok read_memory：同一条重复读返回缓存提示
+  ok read_memory：同一条 1 分钟 3 次上限
+  ok 读取事件写 usage.jsonl
+  ok 读账：search/read/profile 都落 reads.jsonl，失败分支也有
+  ok memory_save：没有原话片段直接拒写
+  ok memory_save：带原话写入，source_quote 落到主库
+  ok memory_save：merge_into 按语义合并，不新建重复条目
+  ok memory_save：7 天内相似条目给 merge_into 软提示
+
+14 通过 · 0 失败
+  ok 词表：数学的下位标签齐全
+  ok 多跳：问「数学」能找到高数/线代，关掉就找不到
+  ok 无关查询返回空，不拿最近的记忆凑数
+  ok 标签过滤
+  ok 过期条目不进候选
+  ok 重排：权重高的排前面
+  ok 候选上限：≤2K
+  ok 正文参与召回：摘要外的具体词能命中，并带上下文片段
+
+8 通过 · 0 失败
+  ok 非桥接会话归 local:dsh
+  ok 本地会话消息进 staging（运行环境快照被丢掉）
+  ok 工程语境抽取只对本地生效
+  ok 本地会话蒸馏进 local:dsh
+  ok 本地会话注入记忆段
+  ok 写入后记忆段当轮可见
+  ok 预设切换后重挂人格/记忆段
+  ok memory_save 写进本地分片
+  ok 桥接配置损坏不误归本地
+  ok 本地记忆开关生效
+  ok 拥有者称呼贯穿来源、人格、记忆规矩
+  ok 本地分片主副库齐全
+
+全部通过：12 项
+  ok 没有「记住」信号：进 suggested
+  ok suggested 不进注入 / 骨架 / 副库 / 检索
+  ok memory_pending 能列出待确认
+  ok memory_confirm 转正后进目录并生效
+  ok 重复确认会被拒
+  ok 原话带「记住」：直接生效
+  ok suggested 不参与取代
+  ok 重复内容不新建（exists）
+  ok 编造原话只能待确认；用户点头后才转正
+  ok 跨两条消息 + 发言人前缀的引用能对上
+  ok 短原话完整命中时放行
+  ok reply_to 行能作为原话证据
+  ok reply_to 行能作为确认点头
+
+全部通过：13 项
+  ok 模式解析：配置优先，认不出来回 enforce
+  ok 三态判定：只有 enforce 会拦
+  ok enforce：没信号进待确认
+  ok warn：放行但条目 / 审计都留记号
+  ok off：只记录、不拦
+  ok warn：原话有信号的不算「会拦」
+
+全部通过：6 项
+  ok 三条消息进了 staging
+  ok 只划掉读过的前缀，中途进来的消息保住
+  ok 重复消费不会误吃新消息
+  ok 剩下的消息下一轮正常蒸馏
+  ok 落盘后崩溃重跑：合并去重，不重复记
+
+全部通过：5 项
+  ok lesson：缺 trigger / 句式不对 / 缺 anti_pattern 都拒写
+  ok lesson：字段进主库 frontmatter 和「要点」，重读能还原
+  ok read_memory 默认带「要点」
+  ok topic：同一目标句合并，只改状态与 last_touched
+  ok memory_update：话题标记完成，不再进提醒
+  ok commitment：今天到期 / 逾期会提醒，远期不打扰
+  ok commitment：条件型（下次提到 X 时）进提醒
+  ok suggested 承诺不进首轮提醒
+  ok search_memory：结果带 kind，行首标类型
+
+9 通过 · 0 失败
+  ok skill：缺 trigger / 句式不对 / 步数越界 / 缺 verify 都拒写
+  ok skill：字段进主库和「步骤」，重读能还原，read_memory 默认带步骤
+  ok skill 不进常驻骨架
+  ok search_memory：技能带类型与触发条件
+  ok memory_update：技能可改进程，半截步骤拒写
+  ok skill：两次失败标待复核，成功清零；空更新拒写
+  ok skill：每分片条数单独限流，先归档用得最少的
+
+7 通过 · 0 失败
+  ok 预演：认出绑定/本地会话，未绑定 QQ 跳过，不写盘
+  ok 真导入：稳定事实留下、过期计划丢掉、凭据打码、清单落盘
+  ok 重跑：默认跳过已导会话；强制重导只加命中不重复造条目
+  ok 回滚：按清单删掉这一批，清单留痕
+  ok 分片上限：到顶的分片不再导入
+  ok --map：显式指定落点后才导未绑定的历史会话
+
+6 通过 · 0 失败
+  ok 蒸馏落原文坐标，主库不复制原文
+  ok read_memory(section=原文)：按指纹定位、带前后文、重新打码
+  ok 原话片段：归一化包含即可定位
+  ok 原会话缺失：退回 source_quote，不报错
+  ok 可选原文缓存：30 天口径，会话没了仍可追溯
+  ok 原文指针：缺会话号或正文就不写
+
+6 通过 · 0 失败
+  ok 仓库识别：从子目录向上找到仓库根，分片 id 稳定
+  ok 开关能关；认不出来就不给命名空间
+  ok DSH_HOME 内的目录不当仓库
+  ok memory_save(namespace=project)：写进仓库自己的库，个人库不留副本
+  ok 仓库库登记到 namespaces.json
+  ok 仓库会话检索/读取能命中仓库库
+  ok 默认写入仍是个人库，检索同时看两个根
+  ok 注入：仓库 + 个人两段骨架，规矩段只出一次
+  ok 不在仓库的会话写 project 直接拒写
+  ok 仓库库未信任：写入 / 检索 / 注入全部停用
+  ok 仓库库 trust 后恢复检索
+
+11 通过 · 0 失败
+  ok propose：从记忆里抽到 emoji / 先给结论两条候选
+  ok probe：20 项，通过 + 失败 = 总数
+  ok apply：只往 EVOLVABLE 追加，核心与纪律原样
+  ok changelog：记下版本、规则与证据 id
+  ok 版本归档：v0 保留原稿
+  ok 基线被改过 → 拒绝应用
+  ok 超预算 → 拒绝应用
+  ok rollback：回到 v0
+  ok 探针回退 → 拒绝应用（事件进人设 / 自曝 AI）
+  ok probe：自曝 AI 被单独抓出来
+  ok stripMarkers / 预算口径
+  ok findReplacement：同主题才换，重复/不同主题不动
+  ok findReplacement：短话不顶长规矩，引用词不算称呼主题
+  ok apply：替换旧说法，不动 CORE 与其它行
+  ok propose：同主题候选转成「替换旧说法」并报出腾出的额度
+  ok 预算可调：DSH_MEMORY_PERSONA_TOKENS 生效并钳在 600–2400
+  ok 审视旧人设：分类、安全压缩、LLM 补充
+  ok 动态预算：先收拾旧人设再算额度，审视/压缩进提案
+  ok apply：真的压缩旧行，CORE 不动且留痕
+  ok 动态预算：同一行只算一次，压缩/替换不重复扣额度
+  ok 冲突：同一行只做替换，压缩自动让位
+  ok 预算解析：默认 / fixed / auto / 回退 / 钳制，设置优先于 env
+  ok validateReplace：同主题 / 不变长 / 约束词 / 硬伤 / 重复
+  ok collectCompressions：keep / shorten / replace / 非法回退
+
+24 通过 · 0 失败
+  ok bumpMessages：累计有效用户消息
+  ok 门槛：消息不足不跑
+  ok 门槛：24 小时内不重复跑
+  ok 满足门槛：生成提案但不自动发布
+  ok 透明度：判决台账 / 采样原因 / 依据 / 预算余量都可查
+  ok 人工通过：连续计数 +1
+  ok 每周最多一个 revision（--force 只放行写入，不放行重复规则）
+  ok 拒绝：连续计数清零并记原因
+  ok 拒绝：同一规则 30 天内不再提（且留痕）
+  ok 拒绝：替换候选同样记入 30 天黑名单
+  ok warn 观察期不自动发布
+  ok 连续 3 次人工通过：跨周自动发布并留痕
+  ok 自动发布后本周封版
+  ok 手动样本门：不足 20 条明确说差多少
+  ok 只有整理没有新增：自动迭代同样发布压缩
+  ok 老提案反推：升级后不用等下一轮就能看到理由
+  ok 自动发布只动 EVOLVABLE 区块
+
+17 通过 · 0 失败
+  ok 采样：只取本人独占分片，命令 / 凭据被挡
+  ok 确定性审查：事件 / 日期 / 号码 / 假证据 / 空证据都拦
+  ok 生成：假证据被丢，事件规则被确定性审查拦下
+  ok 审查：独立模型否决后不进提案，理由留档；替换候选带 old→new 送审
+  ok 审查器失败：退回确定性审查，不写半截结果
+
+全部通过：5 项
+  ok triage 解析：中文动作 / 围栏 / 裸数组 / keep 优先 / 非法 JSON
+  ok propose/apply：keep 保护、候选替换优先、模型替换送审并落盘
+  ok triage 失败：回退规则压缩，提案照常生成
+
+全部通过：3 项
+  ok  手写条目也能解析：类型 / 指针 / 元数据
+  ok  普通括号不当元数据吃掉
+  ok  加一条经验会落盘
+  ok  同一条不重复写
+  ok  偏好沉淀进 USER.md，教训沉淀进 AGENT.md
+  ok  待确认（suggested）不沉淀
+  ok  连续两次失败标待复核，并退出注入
+  ok  容量门：两份文件都不超过 3000 字符
+  ok  selectEntries 优先挑相关条目
+  ok  注入块有硬预算
+  ok  确认闸门转正后自动沉淀
+
+11 通过 · 0 失败
+  ok 读取：空检索 / 重复读 / 读失败都算无效，浪费 token 计入
+  ok 写入：exists / merged 算重复，warn 放行单独计数
+  ok 准确率：满 24h 且仍活着的才算保留
+  ok 窗口可按天数收窄
+
+全部通过：4 项
+  ok TTL：expired 不进副库/骨架/检索，主库文件保留
+  ok 删除：主库文件挪进 archive/full
+  ok 复活：归档条目回到 active，副库恢复
+  ok 过期条目可复活并清掉 TTL
+  ok 待确认 3 天没回应：自动归档，pending 不再挂着
+
+5 通过 · 0 失败
+  ok 公共池：旧情报归档，pin/knowledge 不衰减
+  ok decayScore：pin 免疫时间衰减
+  ok autoPinWhy：知识 / 反复写入 / 反复被查
+  ok pin 字段：主库往返不丢
+  ok searchFunnel(pinned)：只回知识库条目
+  ok forget 批处理：search_hits 账本达标自动钉住
+
+6 通过 · 0 失败
+  ok 冷启动同步门禁默认不可信
+  ok 本地库：默认可用
+  ok 外部库未信任：检索工具拒绝
+  ok trust 后可用，并记下指纹
+  ok 指纹漂移：自动撤销信任
+  ok 自己的写入刷新指纹，不掉信任
+  ok git 仓库里的记忆库默认按外部处理
+  ok revoke 立即停用
+
+8 通过 · 0 失败
+  ok 恢复包：目标/画像/条目/已读已写，≤420 字符
+  ok compaction/end：恢复包进入注入段
+  ok 恢复包过期后自动撤掉
+
+3 通过 · 0 失败
+  ok 事实取代：同槽位旧事实失效
+  ok 不同槽位不误取代
+  ok 口味和观点变化：同主题取代，不同主题保留
+  ok 并发写不丢更新
+  ok 容量门：超限归档
+  ok 相关记忆优先注入
+  ok 速览骨架：相关条目优先于纯权重
+  ok 群成员画像聚合并注入
+  ok 凭据打码（入库 + 注入）
+  ok memory_correct 取代旧说法
+  ok 速览只给最近 + 高权重，其余按需检索
+  ok 群聊手动记忆：发言人取自原话，不用会话称呼
+  ok 泛称不进成员表 / 注入
+
+全部通过：13 项
+  ok 字面查重抓不到的换说法，交给 merge_into
+  ok 同一件事合并：正文/场景/原话都保留，旧版本进 history
+  ok 旧库重复：memory_merge 并成一条，source 标已取代
+  ok 深化兜底：共享内容 bigram 够多时也合并
+  ok 主库：场景/原话/旧原话都能回读
+  ok 索引：摘要后面带场景
+  ok 检索重排：按内容词覆盖排序，泛词不再把无关条目带进来
+
+7 通过 · 0 失败
+  ok 按说话时间归到 今天 / 昨天 / 前天，四天前和未来不出现
+  ok lastHit 漂移不改归日
+  ok 提醒里点过名的条目不在时间线重复
+  ok 群时间线带说话人
+  ok 时间线进速览，且不撑破预算
+
+5 通过 · 0 失败
+name: dsh-whale-memory 0.18.0
+tools: search_memory, memory_recall, read_memory, profile_show, memory_save, memory_update, memory_pin, memory_experience, memory_pending, memory_confirm, memory_merge, memory_correct, memory_review, memory_forget, memory_revive, memory_diary, material_report, notepad
+sections: whale:persona@8500, whale:memory@8550, whale:review@8560
+staging: session-87fd4685-7afd-4281-9238-b02beadc7a5b.jsonl
+staging 内容 ok
+
+apply 自检通过
+  ok  在X上班
+  ok  住在X（私聊里「我」= 主人）
+  ok  群里的「我」不认主，宁可不抽
+  ok  群里说「老爹」照抽
+  ok  喜欢X
+  ok  我是Y
+  ok  时间状语不当主语（明天也是8:30上班）
+  ok  副词开头不当主语
+  ok  谓语不当宾语（我是来打工的）
+  ok  问句不瞎抽
+  ok  长句不当实体
+  ok  问句不拆成「A 是 B」
+  ok  「不喜欢」不被拆成「不…喜欢」
+  ok  自称是单独成关系
+  ok  同一实体跨分片合并成一个节点
+  ok  重复关系合成一条边并加权
+  ok  LLM 三元组合进图谱
+  ok  规则和 LLM 抽到同一条关系不重复加权
+  ok  三元组按条目去重，checked 标记可重复合并
+  ok  1 跳邻居
+  ok  渲染只给相关边
+  ok  topNodes 排序不炸
+  ok  保存后能读回
+  ok  注册了 33 条路由
+  ok  先取会话令牌
+  ok  不带令牌被拒
+  ok  跨站 Origin 被拒
+  ok  /state 返回分片
+  ok  /graph 有节点
+  ok  /audit 返回数组
+  ok   /obs 返回人格/信任/分片
+  ok  POST 非 JSON 被拒
+  ok  /refresh 能重建
+  ok  /diary 返回配置与列表
+  ok  /health 返回体检单
+  ok  /backup/export 返回 JSON 包
+  ok  /backup/import 预演
+  ok  /import/history 预演
+  ok  dispose 后路由清空
+
+39 通过 · 0 失败
+  ok 过滤 harness 元消息
+  ok 整块元消息按块丢弃 / 夹带的提醒剥掉
+  ok 孤儿 staging 隔离
+  ok 配置读不出来时不误搬
+  ok 手动删除走归档
+  ok 活跃记录时效校验
+  ok 空分片不注入 / 按行截断
+  ok 裸地点抽取不过火
+
+全部通过：8 项
+  ok 配置齐全才算就绪
+  ok 桥接拥有者称呼与身份解析
+  ok 候选解析与校验
+  ok 三元组解析与校验
+  ok 三元组抽取：id 对齐 + 严格 JSON
+  ok distillMessages 走 chat/completions
+  ok 空候选正常返回，不触发冷却
+  ok 蒸馏查重：merge_id 对得上旧记忆才保留
+  ok 截断重试与失败原因
+  ok 40 条长消息按条截短且保留最新
+  ok 候选带回来源消息下标
+  ok 群聊蒸馏：拥有者标记 + 动态称呼 + 发言人校验
+  ok 群聊蒸馏：编造的发言人被丢弃
+  ok 群聊蒸馏：同名不同人按尾号区分
+  ok 端点失败返回 null，不写半截结果
+  ok 失败原因可诊断 + 只对 5xx/429 重试
+  ok embedTexts 批量向量
+  ok 自动探测：只试 embedding 模型，标出不支持
+  ok 混合检索：同义词靠向量召回
+  ok 向量端点失败回退词法
+  ok RRF 融合
+  ok LLM 蒸馏接入 distillSession
+  ok 同批候选：同一件事的两个说法只存一条
+  ok src 时间锚 + 规则按消息补漏
+  ok 本地分片双写 + 后写升级
+  ok 蒸馏后自动补图谱三元组
+  ok LLM 失败时规则兜底
+
+全部通过：27 项
+  ok 可用 / 非对话 / 429 重试成功 归类正确
+  ok 连续 429 归为限流
+  ok 401 不连累其它模型
+  ok 403 只影响单个模型
+  ok 超时归为 timeout（含一次重试）
+  ok 网络错误归为 error
+  ok /models 不可用时给出手填退路
+  ok 并发池不超上限
+  ok 超过 40 个截断并标记
+  ok 空端点不请求
+
+全部通过：10 项
+  ok key 只露头尾
+  ok settings.json 往返（DPAPI 可用时 key 加密落盘）
+  ok 启动迁移历史明文 key（DPAPI 可用时加密）
+  ok 文件配置优先于环境变量
+  ok 环境变量兜底 + 全空即关闭
+  ok 探测区分 401 / 地址错 / 连不上
+  ok GET /llm 只回打码
+  ok 保存：同端点留空不改、换端点必须重填、显式才清
+  ok 端点只收 http(s)
+  ok 模型探测：只读、key 沿用、上游失败 502
+  ok 换端点必须重新填 key
+  ok 闲聊搜索模型独立保存，可探测/测试，不串蒸馏
+  ok 向量模型独立保存，测试走 embeddings 接口
+  ok 向量模型可复用蒸馏端点/Key，只填模型名
+  ok 向量模型自动探测：只试 embedding，标出不支持
+  ok 主动聊天会话可绑定、可清空，不再依赖桥接默认
+  ok beat 设置：时间窗 / 兴趣 / 数字都归一化
+  ok beat 专注模式可开可关，且能落盘读回
+  ok 人格预算：GET 默认、POST fixed/auto、非法值 400 且不串配置
+
+全部通过：19 项
+  ok  偏好去掉「喜欢」前缀
+  ok  空分片也有画像
+  ok  traits 抽到偏好
+  ok  topics 抽到实体
+  ok  summary 有数量、偏好、最近
+  ok  summary 不超过 120 字
+  ok  群画像用「这个群」
+  ok  归档条目不进画像
+  ok  没有图谱也不炸（自己现建一份）
+
+示例：这个人：记得 4 件事。偏好：吃烤鱼。常提到：D盘、杭州。最近：老爹明天8:30上班
+9 通过 · 0 失败
+  ok  tokenize 切成 bigram
+  ok  原句能撞上
+  ok  换说法也能撞上
+  ok  少打几个字能撞上
+  ok  地点能撞上
+  ok  完全不相干的不要硬凑
+  ok  空 query 返回空
+  ok  相似度：改标点/换称呼也算像
+
+8 通过 · 0 失败
+  ok 明天 + 钟点
+  ok 后天 / 下午换算
+  ok 钟点已过顺延到明天
+  ok 周几换算
+  ok 几号 / 几月几号
+  ok 认不出来不硬猜
+  ok formatAbs
+  ok 注入出口拆开 {{
+  ok 蒸馏按消息时间锚定
+
+全部通过：9 项
+  ok  脚本能执行并注册模块
+  ok  factory 能物化
+  ok  apply 会注册设置页
+  ok  没 slots 服务时安静退出
+  ok  各页面带数据能渲染（不引用外部未定义变量）
+
+5 通过 · 0 失败
+  ok  lib/client.js 与 client-src/ 一致（10 个片段，175459 字符）
+
+1 通过 · 0 失败
+  ok 可见性规则：群 / 私聊 / 本机 / 仓库 / 公共池
+  ok 群会话默认搜不到私聊条目
+  ok 群会话显式给私聊 scope 也拒绝
+  ok 群会话读不到私聊正文
+  ok 群会话看不到私聊画像
+  ok 群会话查本群正常
+  ok 群读得到公共池，改不了
+  ok 私聊查自己正常，能带出圈子池和公共池
+  ok 工具按自己的会话判可见性，不受别的会话活跃影响
+
+全部通过：9 项
+  ok 指纹与提醒文案
+  ok 回写与关系状态机
+  ok 私聊分片有变更时出现复审提醒
+  ok 分片隔离：群和私聊各自算变更
+  ok memory_review 工具闭环
+
+全部通过：5 项
+  ok 干净库判健康
+  ok 画像、待确认、重复都认得出
+  ok 容量到九成会提醒
+  ok 重复分组按组返回
+  ok 体检幂等、只读
+
+全部通过：5 项
+  ok 备份：核心内容在，日志不在
+  ok 设置去掉 key，其余保留
+  ok 恢复预演不覆盖
+  ok 恢复：内容回到备份版本
+  ok 恢复前自动留档
+校验不通过：备份损坏或被改过
+  清单 18f579c44480979b79d8
+  实际 350409a31b79dce6e140
+  ok 校验不通过拒绝恢复
+
+全部通过：6 项
+  ok 导出：分片条目和人格文件都在
+  ok 预演：算出可导入条数，不写盘
+  ok 导入：条目和缺失的人格文件合并进新库
+  ok 重复导入：同 id/同文不重复
+  ok 死状态条目跳过
+  ok 坏格式拒绝
+
+全部通过：6 项
+  ok 新增行入库，来源/refs/时间都对
+  ok 水位幂等
+  ok 半行等下一轮，补全才入库
+  ok 正文 hash 幂等
+  ok 账本截断后按 hash 兜住重复
+  ok 水位落盘
+  ok 开关可关
+  ok 没有账本不报错
+  ok 投递箱：文件名当来源，通用字段都认
+  ok provider 注册/取数/注销
+  ok 日记按天入库，标题不重复进正文
+  ok 当天覆盖写走 upsert，不重复
+  ok 新的一天入库；走引擎调度不重复
+  ok 没有日记目录不报错
+  ok 总开关可关
+
+15 项通过
+beat ok
+beat-host ok
+  ok 20 个并发 updateState 不丢写
+  ok 并发用户消息计数不丢
+  ok 收尾合并不冲掉投递打标
+  ok vault 失败状态在早退时落盘
+
+4 通过 · 0 失败
+  ok 只收当天新记和当天想起来的，归档排除
+  ok 没素材的日期是空的
+  ok 日期校验和星期标题
+  ok 第一次写：落盘、标题正确、正文来自模型
+  ok 已有当天日记不覆盖、不重复调模型
+  ok force 才会重写
+  ok 读回和列表
+  ok 没素材直接拒绝，不落空文件
+  ok 模型回太短不落盘
+  ok ISO 周：范围和周号
+  ok 周索引：生成、frontmatter、条目格式
+  ok 日日记没变就跳过
+  ok 日记变了会重收，模型不合格式走规则版
+  ok 索引列表与到期检查
+
+14 项通过
+  ok  没有构建信息时退回纯版本号
+  ok  版本一致时拼短 commit
+  ok  打包时工作区脏就带 .dirty
+  ok  指纹版本和当前版本对不上就不显示 commit
+  ok  版本号读 package.json，不是写死的
+  ok  buildInfo 取当前包版本；build-info.json 缺失时返回 null 而不是抛错
+  ok  非 git 目录也能写 build-info，commit 留空
+
+7 通过 · 0 失败
+  ok 分片容量默认 1000
+  ok REVIEW_SECTION 恒注册（无内容时为空）
+  ok 复审段：条目够了就出提醒
+  ok 跨天强制重画：paintedDay 变化即刷新
+  ok 刷新阈值：2 条不画、3 条才画
+  ok 压缩恢复：重复事件覆盖同槽位，不叠加
+
+6 通过 · 0 失败

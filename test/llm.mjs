@@ -19,9 +19,10 @@ process.env.DSH_MEMORY_EMBED_BASE = 'http://stub.local/v1'
 process.env.DSH_MEMORY_EMBED_MODEL = 'stub-embed'
 
 const {
-  llmReady, embedReady, parseCandidates, parseTriples, distillMessages, extractGraphTriples, embedTexts, lastLlmError,
+  llmReady, embedReady, parseCandidates, parseTriples, distillMessages, extractGraphTriples, embedTexts, lastLlmError, listEmbedModels,
 } = await import('../lib/llm.js')
 const { fuseRankings } = await import('../lib/recall.js')
+const { searchFunnel, searchFunnelHybrid, resetVectorFallback } = await import('../lib/funnel.js')
 const { ensureDirs, loadScope, paths } = await import('../lib/store.js')
 const { distillSession } = await import('../lib/distill.js')
 const { loadTriples } = await import('../lib/graph.js')
@@ -271,6 +272,48 @@ try {
   const vecs = await embedTexts(['a', 'b'], { fetchImpl: embedStub })
   assert.deepEqual(vecs, [[1, 0], [0, 1]])
   ok('embedTexts 批量向量')
+
+  // 自动探测向量模型：名字像 embedding 的优先，不支持的标 unusable
+  const embedModelsStub = async (url, opts = {}) => {
+    const resp = (obj, status = 200) => ({
+      ok: status < 400, status, json: async () => obj, text: async () => JSON.stringify(obj),
+    })
+    if (url.endsWith('/models')) {
+      return resp({ data: [{ id: 'deepseek-v4.1-flash' }, { id: 'bge-m3' }, { id: 'fake-embed-bad' }, { id: 'chat-model' }] })
+    }
+    const model = String(JSON.parse(opts.body || '{}').model || '')
+    if (model.includes('bad')) return { ok: false, status: 400, text: async () => 'does not support /embeddings' }
+    return resp({ data: [{ embedding: [1, 2, 3] }] })
+  }
+  const probeList = await listEmbedModels({ base: 'http://stub.local/v1', key: 'k', fetchImpl: embedModelsStub })
+  assert.equal(probeList.ok, true, JSON.stringify(probeList))
+  assert.equal(probeList.counts.usable, 1)
+  assert.equal(probeList.counts.unusable, 1)
+  assert.equal(probeList.models.length, 2, '只测名字像 embedding 的')
+  assert.ok(probeList.models.every((m) => /embed|bge/i.test(m.id)), JSON.stringify(probeList.models))
+  ok('自动探测：只试 embedding 模型，标出不支持')
+
+  // 向量真的参与检索：问「咖啡」能召回到只写了「冰美式」的条目
+  resetVectorFallback()
+  const vecScope = {
+    scope: 'test:vec',
+    items: [
+      { id: 'coffee', text: '老爹喜欢喝冰美式', kind: 'pref', state: 'active', weight: 0.5, confidence: 0.8, timeline: '2026-11-11' },
+      { id: 'deploy', text: '今天修了补货逻辑', kind: 'fact', state: 'active', weight: 0.5, confidence: 0.8, timeline: '2026-11-11' },
+    ],
+  }
+  const lexOnly = searchFunnel([vecScope], { query: '他对咖啡怎么看', hops: false })
+  assert.ok(!lexOnly.some((x) => x.id === 'coffee'), '词法不该靠同义词命中')
+  const fakeEmbed = async (texts) => texts.map((t) => (/咖啡|冰美式/.test(String(t)) ? [1, 0] : [0, 1]))
+  const mixed = await searchFunnelHybrid([vecScope], { query: '他对咖啡怎么看', hops: false, embedImpl: fakeEmbed })
+  assert.equal(mixed[0]?.id, 'coffee', JSON.stringify(mixed.map((x) => [x.id, x.why])))
+  assert.ok(mixed[0].why.some((x) => x.includes('向量')), mixed[0].why.join('；'))
+  ok('混合检索：同义词靠向量召回')
+
+  resetVectorFallback()
+  const down = await searchFunnelHybrid([vecScope], { query: '他对咖啡怎么看', hops: false, embedImpl: async () => null })
+  assert.equal(down.length, lexOnly.length, '向量挂了要回退词法')
+  ok('向量端点失败回退词法')
 
   // RRF：两个通道名次不同，融合后两边都保留
   const a = { id: 'a' }

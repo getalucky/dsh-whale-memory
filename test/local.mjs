@@ -20,11 +20,11 @@ process.env.DSH_QQ_BRIDGE_CONFIG = join(root, 'no-such-bridge.json')
 process.env.DSH_MEMORY_HOME = root
 delete process.env.DSH_MEMORY_LOCAL_SCOPE
 
-const { ensureDirs, listScopes, loadScope, paths } = await import('../lib/store.js')
+const { ensureDirs, listScopes, loadScope, addItem, saveScope, paths } = await import('../lib/store.js')
 const { preloadSources, sourceOfSession, resetSourceCache } = await import('../lib/source.js')
 const { registerIngest, flush, readStagingLines, lastActive } = await import('../lib/ingest.js')
 const { distillSession, extractCandidates } = await import('../lib/distill.js')
-const { registerInjection, resetCaches, personaSnapshot, MEMORY_SECTION, PERSONA_SECTION } = await import('../lib/inject.js')
+const { registerInjection, resetCaches, personaSnapshot, MEMORY_SECTION, PERSONA_SECTION, noteSessionItem } = await import('../lib/inject.js')
 const { preloadTrust } = await import('../lib/trust.js')
 const { renderRules } = await import('../lib/skeleton.js')
 const { registerTools } = await import('../lib/tools.js')
@@ -108,6 +108,17 @@ try {
   assert.ok(mem, `本地会话没挂记忆段：${sections.map((s) => s.name).join(',')}`)
   assert.ok(String(mem.text()).includes('记忆使用规矩'), '记忆段缺规矩')
   ok('本地会话注入记忆段')
+
+  // 5a. 刚写完的记忆，不等 5 分钟 / 3 条阈值，下一轮就该在段里看得到
+  {
+    const sc = await loadScope(root, 'local', 'dsh')
+    const fresh = addItem(sc, { text: '刚记下的当轮可见测试', kind: 'fact', conf: 0.9 })
+    await saveScope(root, sc)
+    noteSessionItem(root, sid, 'write', fresh.id)
+    await new Promise((r) => setTimeout(r, 200))
+    assert.ok(String(mem.text()).includes('刚记下的当轮可见测试'), '写入后记忆段没刷新：' + mem.text())
+    ok('写入后记忆段当轮可见')
+  }
 
   // 5b. 预设切换：宿主 recompose 会把预设那层拆掉重挂，段得在新层补回来
   const before = sections.length

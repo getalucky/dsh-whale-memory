@@ -23,6 +23,11 @@ import { autoTick, bumpMessages } from '../lib/personaloop.js'
 let pass = 0
 const ok = (name) => { pass += 1; console.log('  ok', name) }
 
+// 本机 shell 里配了模型不该改变这里的预期：无模型就走规则压缩。
+for (const k of Object.keys(process.env)) {
+  if (/^DSH_MEMORY_(?:LLM|REVIEW|SEARCH|EMBED|PERSONA)_/.test(k)) delete process.env[k]
+}
+
 const ORIGINAL = `<!-- PERSONA:CORE:START -->
 你是测试鲸鱼。
 <!-- PERSONA:CORE:END -->

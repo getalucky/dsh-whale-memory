@@ -22,6 +22,10 @@ delete process.env.DSH_MEMORY_LLM_KEY
 delete process.env.DSH_MEMORY_SEARCH_BASE
 delete process.env.DSH_MEMORY_SEARCH_MODEL
 delete process.env.DSH_MEMORY_SEARCH_KEY
+delete process.env.DSH_MEMORY_PERSONA_MODE
+delete process.env.DSH_MEMORY_PERSONA_TOKENS
+delete process.env.DSH_MEMORY_PERSONA_WINDOW
+delete process.env.DSH_MEMORY_PERSONA_SHARE
 // 别读本机真实桥接配置：目标候选测试只关心结构
 const bridgeStub = join(root, 'qq-bridge.json')
 process.env.DSH_QQ_BRIDGE_CONFIG = bridgeStub
@@ -31,9 +35,10 @@ await writeFile(bridgeStub, JSON.stringify({
 }), 'utf8')
 
 const { loadSettings, saveSettings, migratePlaintextSettings, maskKey, settingsPath } = await import('../lib/settings.js')
-const { llmReady, searchReady, probeLlm, setConfigRoot, resetSettingsCache } = await import('../lib/llm.js')
+const { llmReady, searchReady, embedReady, probeLlm, setConfigRoot, resetSettingsCache } = await import('../lib/llm.js')
 const { ownerTarget } = await import('../lib/beat/delivery.js')
 const { registerWebApi, API_PREFIX } = await import('../lib/webapi.js')
+const { personaBudget, setPersonaBudget } = await import('../lib/personalimit.js')
 
 let pass = 0
 const ok = (name) => { pass += 1; console.log('  ok', name) }
@@ -311,6 +316,92 @@ try {
   }
   ok('闲聊搜索模型独立保存，可探测/测试，不串蒸馏')
 
+  // ---- 8.55 向量模型：/llm/embed 独立，测试走 /embeddings ----
+  const embedSaved = await 调('/llm/embed', {
+    method: 'POST',
+    body: { base: 'https://embed.example/v1/', model: 'bge-m3', key: 'sk-embed-1234' },
+  })
+  assert.equal(embedSaved.statusCode, 200)
+  assert.equal(embedSaved.body.kind, 'embed')
+  assert.equal(embedSaved.body.base, 'https://embed.example/v1')
+  assert.equal(embedSaved.body.ready, true)
+  assert.equal(embedReady(), true)
+  assert.equal(loadSettings(root).embed.model, 'bge-m3')
+  const embedGot = await 调('/llm/embed')
+  assert.ok(!JSON.stringify(embedGot.body).includes('sk-embed-1234'), 'GET 不能回完整 key')
+
+  const seenEmbed = []
+  globalThis.fetch = async (url, opts = {}) => {
+    seenEmbed.push({ url, auth: opts.headers?.authorization })
+    const body = { data: [{ embedding: [0.1, 0.2, 0.3] }] }
+    return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) }
+  }
+  try {
+    const et = await 调('/llm/embed/test', { method: 'POST' })
+    assert.equal(et.body.ok, true, JSON.stringify(et.body))
+    assert.equal(et.body.dim, 3)
+    const call = seenEmbed.find((x) => x.url.endsWith('/embeddings'))
+    assert.ok(call, '向量测试要走 /embeddings')
+    assert.equal(call.url, 'https://embed.example/v1/embeddings')
+    assert.equal(call.auth, 'Bearer sk-embed-1234')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  ok('向量模型独立保存，测试走 embeddings 接口')
+
+  // 复用蒸馏端点/Key：只填模型名，base/key 运行时跟 llm 走
+  const inheritSaved = await 调('/llm/embed', {
+    method: 'POST',
+    body: { inherit: true, model: 'bge-m3' },
+  })
+  assert.equal(inheritSaved.statusCode, 200)
+  assert.equal(inheritSaved.body.base, 'https://probe.example/v1')
+  assert.equal(inheritSaved.body.inherit, true)
+  assert.equal(inheritSaved.body.ready, true, JSON.stringify(inheritSaved.body))
+  assert.equal(loadSettings(root).embed.base, '')
+  const seenInherit = []
+  globalThis.fetch = async (url, opts = {}) => {
+    seenInherit.push({ url, auth: opts.headers?.authorization })
+    const body = { data: [{ embedding: [1, 0] }] }
+    return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) }
+  }
+  try {
+    const it = await 调('/llm/embed/test', { method: 'POST' })
+    assert.equal(it.body.ok, true, JSON.stringify(it.body))
+    assert.equal(seenInherit[0].url, 'https://probe.example/v1/embeddings')
+    assert.equal(seenInherit[0].auth, 'Bearer secret-key')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  ok('向量模型可复用蒸馏端点/Key，只填模型名')
+
+  // 向量模型自动探测：优先试名字像 embedding 的，标出不支持
+  const seenEmbedProbe = []
+  globalThis.fetch = async (url, opts = {}) => {
+    seenEmbedProbe.push(url)
+    const resp = (obj, status = 200) => ({ ok: status < 400, status, json: async () => obj, text: async () => JSON.stringify(obj) })
+    if (url.endsWith('/models')) {
+      return resp({ data: [{ id: 'deepseek-v4.1-flash' }, { id: 'kinfra-text-embedding-0.6b' }, { id: 'fake-embed-bad' }] })
+    }
+    const model = String(JSON.parse(opts.body || '{}').model || '')
+    if (model.includes('bad')) return { ok: false, status: 400, text: async () => 'does not support /embeddings' }
+    return resp({ data: [{ embedding: [1, 2, 3] }] })
+  }
+  try {
+    const probed = await 调('/llm/embed/models', {
+      method: 'POST',
+      body: { base: 'https://probe.example/v1', key: 'secret-key' },
+    })
+    assert.equal(probed.statusCode, 200, JSON.stringify(probed.body))
+    assert.equal(probed.body.counts.usable, 1)
+    assert.equal(probed.body.counts.unusable, 1)
+    assert.ok(probed.body.models.every((m) => /embed|bge/i.test(m.id)), JSON.stringify(probed.body.models))
+    assert.ok(seenEmbedProbe.some((u) => u.endsWith('/embeddings')), '要真的打 /embeddings')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  ok('向量模型自动探测：只试 embedding，标出不支持')
+
   // ---- 8.6 投递目标绑定 ----
   assert.equal(ownerTarget({}).ok, false, '没绑定就不投')
   assert.equal(ownerTarget({}).why, 'no-target')
@@ -355,6 +446,7 @@ try {
       minIntervalHours: '5',
       interests: '城市生活、独立游戏',
       maxWanderPerDay: '3',
+      refillWebBelow: '3',
     },
   })
   assert.equal(beatSaved.statusCode, 200)
@@ -364,6 +456,7 @@ try {
   assert.equal(beatSaved.body.config.minIntervalHours, 5)
   assert.deepEqual(beatSaved.body.config.interests, ['城市生活', '独立游戏'])
   assert.equal(beatSaved.body.config.maxWanderPerDay, 3)
+  assert.equal(beatSaved.body.config.refillBelowBySource.web, 3)
 
   const badWindow = await 调('/beat/config', { method: 'POST', body: { windows: '11点-15点' } })
   assert.equal(badWindow.statusCode, 400)
@@ -378,6 +471,63 @@ try {
   const unfocused = await 调('/beat/focus', { method: 'POST', body: { off: true } })
   assert.equal(unfocused.body.focusUntil, '')
   ok('beat 专注模式可开可关，且能落盘读回')
+
+  // ---- 10. 人格预算：GET 默认 / POST fixed/auto 落盘并立刻生效 ----
+  const budget0 = await 调('/persona/budget')
+  assert.equal(budget0.statusCode, 200)
+  assert.equal(budget0.body.ok, true)
+  assert.equal(budget0.body.config.mode, 'fixed')
+  assert.equal(budget0.body.budget.limit, 1200)
+  assert.deepEqual(budget0.body.limits.tokens, [600, 2400])
+  assert.equal(loadSettings(root).persona_budget, undefined, 'GET 不能顺手写盘')
+
+  const llmBefore = loadSettings(root).llm
+  const fixedSaved = await 调('/persona/budget', {
+    method: 'POST',
+    body: { mode: 'fixed', tokens: 1800, window: 128000, share: 0.01 },
+  })
+  assert.equal(fixedSaved.statusCode, 200, JSON.stringify(fixedSaved.body))
+  assert.equal(fixedSaved.body.budget.mode, 'fixed')
+  assert.equal(fixedSaved.body.budget.limit, 1800)
+  assert.equal(fixedSaved.body.budget.source, 'settings')
+  assert.deepEqual(loadSettings(root).persona_budget, { mode: 'fixed', tokens: 1800, window: 128000, share: 0.01 })
+  assert.deepEqual(loadSettings(root).llm, llmBefore, '保存预算不能覆盖模型配置')
+  assert.equal(personaBudget().limit, 1800, '保存后本进程立即生效')
+
+  const budgetGot = await 调('/persona/budget')
+  assert.equal(budgetGot.body.budget.limit, 1800)
+  assert.equal(budgetGot.body.budget.source, 'settings')
+
+  const autoSaved = await 调('/persona/budget', {
+    method: 'POST',
+    body: { mode: 'auto', tokens: 1800, window: 128000, share: 0.01 },
+  })
+  assert.equal(autoSaved.statusCode, 200, JSON.stringify(autoSaved.body))
+  assert.equal(autoSaved.body.budget.mode, 'auto')
+  assert.equal(autoSaved.body.budget.limit, 1280)
+  assert.equal(autoSaved.body.budget.window, 128000)
+  assert.equal(autoSaved.body.budget.share, 0.01)
+  assert.equal(loadSettings(root).persona_budget.mode, 'auto')
+  assert.equal(personaBudget().mode, 'auto')
+
+  // 非法输入一律 400，且不能把上一次的有效配置冲掉
+  const budgetBad = [
+    { mode: 'auto', tokens: 1200, share: 0.01 },
+    { mode: 'auto', tokens: 1200, window: 128000 },
+    { mode: 'weird', tokens: 1200 },
+    { mode: 'fixed', tokens: 99999 },
+    { mode: 'auto', window: 100, share: 0.01 },
+    { mode: 'auto', window: 128000, share: 0.5 },
+  ]
+  for (const body of budgetBad) {
+    const r = await 调('/persona/budget', { method: 'POST', body })
+    assert.equal(r.statusCode, 400, `应该拒绝：${JSON.stringify(body)}`)
+    assert.equal(r.body.ok, false)
+  }
+  assert.equal(loadSettings(root).persona_budget.tokens, 1800, '被拒的保存不能改配置')
+  assert.equal(loadSettings(root).persona_budget.window, 128000, '非法保存不能冲掉窗口')
+  ok('人格预算：GET 默认、POST fixed/auto、非法值 400 且不串配置')
+  setPersonaBudget(null)
 
   console.log(`\n全部通过：${pass} 项`)
 } catch (e) {

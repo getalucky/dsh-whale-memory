@@ -57,7 +57,9 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
 ## 它做什么
 
 - **固定人格**：`persona.md` 挂进所有会话的 system prompt（默认全局，含人格与纪律）；注入前去掉区块标记，
-  预算默认 ≤1200 tok，可用 `DSH_MEMORY_PERSONA_TOKENS` 调到 600–2400（每轮请求都注入，调大更费上下文）。
+  预算默认 ≤1200 tok，可固定成任意值，也可按「上下文窗口 × 占比」自动算，统一钳在 600–2400
+  （每轮请求都注入，调大更费上下文）。设置页「运行 → 人格预算」可改，存 `settings.json` 立即生效；
+  自动模式必须显式填窗口和占比，缺任一项回退固定额度并说明原因。
   完整来历与旧稿在 `persona_full.md`（只做参考，不注入）。人格沉淀走 `node tools/persona.mjs propose/apply/rollback`，只改 EVOLVABLE 区块，人工确认后版本化落盘。
   蒸馏生成与审查分开：生成只看脱敏样本（命令 / 日志 / 凭据不进，按分片均衡），审查先跑确定性检查
   （证据 id 必须在库、不写事件 / 日期 / 号码 / 路径 / 凭据、不重复、不超预算），再可选调独立审查模型；
@@ -70,12 +72,15 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
   同一规则 30 天内不再提；回滚也清零。「每周最多一个 revision」对自动发布硬拦，人工紧急用 `apply --force`。
   关掉自动跑：`DSH_MEMORY_PERSONA_AUTO=off`（CLI 手动流程不受影响）。
   迭代时会顺带**逐行审视旧人设**（`node tools/persona.mjs audit`，只读）：哪些偏长、哪些只是示例/
-  反例、哪些疑似重复。能安全写短的生成压缩建议；新说法跟现有某条规矩说的是同一件事
-  （同主题且字面够像，或相似度够高）、且不比旧的更长，就提议「用新的顶掉旧的」而不是继续往上堆；
-  旧行比新话长太多时不替换（那种交给压缩，避免一句短话顶掉一整段旧规矩）。
+  反例、哪些疑似重复。配了模型时，每轮还会把 EVOLVABLE 逐行分成
+  **必须保留 / 可缩短 / 可替换**（`personaTriage`），必须保留的行这轮不压缩也不替换；
+  模型给的精简和替换都要过确定性校验（更短、仍含约束词、不带事件 / 日期 / 路径 / 凭据、不重复、
+  替换不比旧行长且同主题），不合法就丢掉、规则压缩照常补位。同一行的优先级：
+  必须保留 > 有证据的候选替换 > 模型替换 > 压缩；替换被审查模型否决后，先前算好的压缩自动顶上。
+  模型没返回或格式不对，完整回退到规则压缩，提案照常生成。
   **预算是动态的**：可用额度 ＝ 上限 − 当前占用 + 压缩腾出的 + 替换腾出的；生成候选时就按
-  「先收拾旧人设之后」的占用做审查，不再死守当前那个 18 tok 的余额。上限仍可用
-  `DSH_MEMORY_PERSONA_TOKENS` 调，但优先靠整理腾位置，不是一味抬高天花板或一味追加。
+  「先收拾旧人设之后」的占用做审查，不再死守当前那个 18 tok 的余额。上限可固定也可自动，
+  但优先靠整理腾位置，不是一味抬高天花板或一味追加。
   压缩和替换同样要过确定性审查、独立审查模型、人工/自动闸门和前后探针比对，只是提案，
   不会静默写盘；整行精确匹配，找不到旧行就拒绝应用，同一行不既压缩又替换。
 - **人格迭代可追溯**：每次 `propose` 的每条候选都写进 `persona_decisions.jsonl`——
@@ -109,7 +114,7 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
   （`（10-31 08:30）`），否则三天后它还在说「明天」
 - **事实取代**：同一个人、同一个槽位（上班时间 / 住址 / 名字 / 年龄 / 电话）的新说法
   会让旧条目标成 `superseded`，不再注入、不进图谱，但留在库里可回溯
-- **容量门**：单个分片最多 400 条，超了把最冷的搬进 `archive/`（不删）
+- **容量门**：单个分片最多 1000 条，超了把最冷的搬进 `archive/`（不删）
 - **命中记录**：每条消息命中的条目只记在内存里（供后续预览/调试），不再影响常驻段，也不逐条消息重画 system prompt
 - **群成员**：只记昵称和活跃度，注入成「【群里的人】」，不落 QQ 号
 - **淡忘**：`conf × exp(-age/30d) × 命中加成`，低于 0.5 降 warm、低于 0.25 降 cold
@@ -141,6 +146,7 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
 - **历史补录**：`node tools/import-history.mjs` 扫 `$DSH_HOME/sessions/`，按同一套采集/蒸馏过滤
   把旧会话补进记忆库。默认预演、只走规则、丢掉过期计划；只导当前绑定表能确定分片的 QQ 会话，
   未绑定的必须 `--map` 显式指定；每次导入带 `source=import:<run>` 和清单，可整批回滚
+- **备份与召回**：顶层「备份」页可导出 JSON 包（分片条目 + 人格文件，不含模型密钥），导入时按 id / 文本去重合并，不覆盖当前库；同一页的「导入召回」可扫描 `$DSH_HOME/sessions/` 的旧会话，先预演再导入。整目录备份/恢复仍用 `tools/backup.mjs`（需关闭 DSH）。
 - **原文追溯**：蒸馏/导入/`memory_save` 写条目时只带坐标 `{sessionId,msgIndex,hash}`，不复制原文。
   需要核对时用 `read_memory(section:"原文")`，按原话指纹去 `$DSH_HOME/sessions/` 找会话文件
   （`.jsonl` / `.jsonl.zstd`），返回命中句和前后几句；读出来先重新打码。会话被 DSH 清理后
@@ -155,7 +161,7 @@ node tools/deploy.mjs                      # 打包 + 装机，一条命令干�
 - **L3 图谱**：把记忆拆成「实体 —关系→ 实体」，落 `graph/nodes.jsonl` + `graph/edges.jsonl`；
   规则抽不到的条目交给 LLM 批量抽，结果存 `graph/triples.jsonl`（不重复进提示词）。
   目前只用于界面展示，不再塞进 system prompt（注入只留规矩段 + 骨架）
-- **界面**：DSH 设置 → 「大肥鱼记忆」，横向主菜单 + 内容页顶部子页签。顶层是总览 / 记忆 / 主动 / 模型 / 记录；总览里分「概览 / 运行」，记忆里分「分片 / 星云 / 审计」，主动里分「状态 / 素材 / 设置 / 维护」，模型里分「蒸馏 / 找素材」，记录里是「日记」。运行页看人格预算、信任状态、每分片容量、最近检索与跳过原因，以及人格迭代的当前状态、待确认提案与每条候选的判决明细；记忆页可以删单条，待确认的一栏能点「确认」转正
+- **界面**：DSH 设置 → 「大肥鱼记忆」，横向主菜单 + 内容页顶部子页签。顶层是总览 / 记忆 / 主动 / 模型 / 备份 / 记录；总览里分「概览 / 运行」，记忆里分「分片 / 星云 / 审计」，主动里分「状态 / 素材 / 设置 / 维护」，模型里分「蒸馏 / 向量 / 找素材」，备份页里是「数据」，记录里是「日记」。运行页首屏先给人格迭代结论（有没有待确认提案、下一步做什么、关键数字），下面才是预算调整、信任、分片容量、最近检索与跳过原因；提案明细、逐行分类、旧人设审视与判决台账都收在折叠区，需要时再展开；记忆页可以删单条，待确认的一栏能点「确认」转正
 
 ## 数据长什么样
 
@@ -198,7 +204,7 @@ node tools/import-history.mjs --rollback imp-...    # 按清单整批回滚
   稳定事实、偏好、工程约定照常收
 - **不猜身份**：只导当前 QQ 绑定表里能确定分片的会话；历史会话的 session id 不在表里时跳过，
   确认归属后用 `--map <session-id>=private:<QQ>`（群用 `group:<群号>`）显式指定
-- **配额**：每个分片默认最多 320 条生效记忆（低于全局 400），本次运行最多新增 200 条；
+- **配额**：每个分片默认最多 320 条生效记忆（低于全局 1000），本次运行最多新增 200 条；
   到顶就停，后面再补不会把分片挤爆
 - **可回滚**：条目 `source=import:<run>`，清单落 `archive/imports/<run>.json`；
   回滚只删这一批新造、且正文没被后来改过的条目
@@ -306,13 +312,14 @@ B站除了追加式账本 `memory.jsonl`，还会同步 `bili-duty/diary/<日期
 
 ## 界面怎么来的
 
-`lib/client.js` 是手工写的客户端 bundle，必须长这样：
+`lib/client.js` 是构建产物，源码按页面拆在 `client-src/`；改完源码跑 `node tools/build-client.mjs` 拼回单文件。产物必须长这样：
 
 ```js
 window.__ModuleLoader__.load({ id: '<包名>', factory: (require) => { ... } })
 ```
 
 - 里面只能 `require('react')`，**不能有顶层 import/export**，否则宿主 `ClientModuleRegistry.flush` 直接抛错，整个 DSH 起不来
+- `test/client-build.mjs` 会检查 `lib/client.js` 和 `client-src/` 是否漂移，忘了构建会直接报错
 - `package.json` 必须同时有 `dsh.client`（platform: web）和 `exports["./client"]`
 - 改完先跑 `node tools/verify-client.mjs`（复刻宿主校验规则），过了再重启
 - 崩了打不开：把 `package.json` 的 `exports["./client"]` 和 `dsh.client` 摘掉，只留记忆本体，宿主就不会因为客户端 bundle 报错而整个起不来
@@ -342,12 +349,16 @@ node test/origin.mjs    # 原文指针：按指纹回溯 / 缺失退回原话 / 
 node test/skill.mjs     # 技能：必填字段 / 不进骨架 / 失败复核 / 每分片限流
 node test/build.mjs     # 构建指纹：版本对不上不拼 commit / 非 git 目录也能生成
 node test/client.mjs    # 客户端 bundle 离线冒烟
+node test/client-build.mjs # 客户端源码与产物漂移
+node test/itemstate.mjs # 状态集合与 live/dead 判断
+node test/backupbundle.mjs # 界面备份包：导出 / 预演 / 合并导入
 node test/persona.mjs   # 人格闸门 + 探针 + 变更日志 + 旧人设审视 / 压缩 / 替换 / 动态预算
 node test/personaauto.mjs # 人格自动迭代：门槛 / 每周一次 / 连续通过 / 拒绝清零
 node test/docs.mjs      # AGENT.md / USER.md：容量门 / 去重 / 失败降级 / 注入预算
 node test/gate.mjs      # 确认闸门灰度：off / warn / enforce
 node test/metrics.mjs   # 真实流量指标口径：读有效率 / 写入准确率 / 重复写入
 node test/personadistill.mjs  # 人格蒸馏：采样脱敏 / 生成审查分离 / 假证据拦截
+node test/personatriage.mjs   # 人格逐行三分类：keep 保护 / 模型替换校验 / 候选优先 / 失败回退
 node tools/verify-client.mjs   # 重启前体检
 node tools/check.mjs           # 跑起来之后看真实数据
 ```
@@ -374,8 +385,12 @@ $DSH_HOME/dsh-memory/        （可用 DSH_MEMORY_HOME 改到别处）
 - `DSH_MEMORY_HOME` — 记忆库根目录
 - `DSH_MEMORY_PERSONA_SCOPE` — `all`（默认，所有会话都挂人格）/ `bridge`（只挂 QQ 桥接）
 - `DSH_MEMORY_PERSONA_AUTO` — 人格自动迭代：`on`（默认，每小时检查）/ `off`（只留手动 CLI）
-- `DSH_MEMORY_PERSONA_TOKENS` — 人格预算，默认 1200，钳在 600–2400。调大能继续往 EVOLVABLE 追加，
-  但 `persona.md` 每个会话都注入一遍，等于每轮请求多带这些字
+- `DSH_MEMORY_PERSONA_TOKENS` — 人格预算的固定额度，默认 1200，钳在 600–2400。调大能继续往 EVOLVABLE 追加，
+  但 `persona.md` 每个会话都注入一遍，等于每轮请求多带这些字。设置页「运行 → 人格预算」存
+  `settings.json` 的 `persona_budget` 优先于环境变量
+- `DSH_MEMORY_PERSONA_MODE` — `fixed`（默认，用 `TOKENS`）/ `auto`（按上下文窗口 × 占比自动算）
+- `DSH_MEMORY_PERSONA_WINDOW` — 自动模式的上下文窗口（1000–2,000,000），`/models` 不返回窗口，必须手填
+- `DSH_MEMORY_PERSONA_SHARE` — 自动模式的占比（0.001–0.2，即 0.1%–20%），算出的额度仍钳在 600–2400
 - `DSH_MEMORY_LOCAL_SCOPE` — `on`（默认，本地会话也记）/ `off`（退回只收 QQ 桥接）
 - `DSH_MEMORY_PROJECT_SCOPE` — `on`（默认，仓库里的本地会话可挂 project 命名空间）/ `off`（只有个人库）
 - `DSH_MEMORY_GATE` — confirm 闸门灰度：`enforce`（默认）/ `warn`（放行但留记号）/ `off`（不拦）

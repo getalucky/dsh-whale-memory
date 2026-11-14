@@ -68,6 +68,23 @@ async function main() {
     now: at(12), config: cfg, materialCount: 0,
     state: { wanderDay: dayKey(at(12)), wanderCount: 2 },
   }).reason, 'daily_cap')
+  // 总量够但搜索素材见底：仍然要补；按来源算缺口。
+  const freshRefill = { lastRefillAt: at(11).toISOString() }
+  const lowWeb = wanderDue({
+    now: at(12), config: cfg, state: freshRefill,
+    materialCounts: { active: 13, bySource: { chat: 6, web: 0, public: 7 } },
+  })
+  assert.equal(lowWeb.due, true)
+  assert.equal(lowWeb.reason, 'source_low')
+  assert.deepEqual(lowWeb.sources, ['web'])
+  assert.equal(wanderDue({
+    now: at(12), config: cfg, state: freshRefill,
+    materialCounts: { active: 13, bySource: { chat: 6, web: 2, public: 7 } },
+  }).reason, 'enough')
+  // 来源见底只放行话题类闸门；忙、静默这些照旧拦。
+  assert.equal(gateAllowsWander({ ok: false, reason: 'off-topic' }), false)
+  assert.equal(gateAllowsWander({ ok: false, reason: 'off-topic' }, { sourceLow: true }), true)
+  assert.equal(gateAllowsWander({ ok: false, reason: 'busy' }, { sourceLow: true }), false)
 
   // 3. 闸门
   const base = { ...DEFAULT_CONFIG, quietHours: { start: '01:00', end: '08:00' } }
@@ -172,14 +189,18 @@ async function main() {
       await rm(pubRoot, { recursive: true, force: true })
     }
 
-    // 7. 会话素材
+    // 7. 会话素材：要具体内容，纯反应和纯附和不要
     const messages = [
       { m: { text: '下次给我看看那个书店', at: at(12).toISOString(), speaker: '爹' } },
-      { m: { text: '这个真受不了，太离谱了', at: at(12, 1).toISOString(), speaker: '爹' } },
+      { m: { text: '这个接口又崩溃了，部署三次都失败', at: at(12, 1).toISOString(), speaker: '爹' } },
       { m: { text: '今天天气不错', at: at(12, 2).toISOString(), speaker: '爹' } },
     ]
     const cs = extractChatCandidates(messages, { max: 3 })
-    assert.ok(cs.length >= 2)
+    assert.equal(cs.length, 2)
+    assert.ok(cs.every((x) => x.text.length > 0))
+    for (const junk of ['确实是越来越离谱了', '这个真受不了，太离谱了', '嗯可以以后记得保持', '[引用了一条消息] 这编得越来越离谱了']) {
+      assert.equal(extractChatCandidates([{ m: { text: junk, at: at(12).toISOString(), speaker: '爹' } }]).length, 0, `低质量要丢掉：${junk}`)
+    }
     // 会话素材要带上她上一句，否则单句剪出来缺上文。
     const withContext = [
       { m: { text: '你要不要换新会话？', at: at(12).toISOString(), speaker: '大肥鱼', role: 'her' } },
@@ -189,6 +210,13 @@ async function main() {
     assert.equal(ctxCands.length, 1)
     assert.equal(ctxCands[0].text, '以后跟我吧')
     assert.equal(ctxCands[0].context, '你要不要换新会话？')
+    // 上文优先她说的话，桥接包裹要剥掉；不用同一个人的上一句凑数。
+    const ctxCleaned = extractChatCandidates([
+      { m: { text: '[QQ]你先试试新接口[/QQ]', at: at(12).toISOString(), speaker: '大肥鱼', role: 'her' } },
+      { m: { text: '插一句别的', at: at(12, 1).toISOString(), speaker: '别人', role: 'user' } },
+      { m: { text: '下次给我看看那个书店', at: at(12, 2).toISOString(), speaker: '爹', role: 'user' } },
+    ])
+    assert.equal(ctxCleaned[0].context, '你先试试新接口')
     const addedChat = await addChatMaterial(root, messages, { config: saved, now: at(12) })
     assert.ok(addedChat.added >= 2)
     const counts = await materialCounts(root)

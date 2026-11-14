@@ -28,6 +28,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { writeBuildInfo } from './build-info.mjs'
+import { buildClientSource, clientOutputPath } from './build-client.mjs'
 
 const 根 = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DSH家 = process.env.DSH_HOME
@@ -79,6 +80,13 @@ const 时间 = new Date().toLocaleString('sv-SE').replace(/[-: ]/g, '').slice(0,
 const 临时 = join(根, '.pack')
 rmSync(临时, { recursive: true, force: true })
 mkdirSync(临时, { recursive: true })
+
+// 网页端源码拆在 client-src/：打包前强制重建，避免把旧产物带进包
+if (existsSync(join(根, 'client-src'))) {
+  const 客户端 = buildClientSource(根)
+  writeFileSync(clientOutputPath(根), 客户端, 'utf8')
+  console.log(`[客户端] client-src -> lib/client.js（${客户端.length} 字符）`)
+}
 
 // 先写构建指纹再打包：包里的 lib/build-info.json 就是这一次 deploy 的来源
 const 构建 = writeBuildInfo(根)

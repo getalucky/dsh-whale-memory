@@ -195,7 +195,7 @@ t('保存后能读回', () => { eq(g1.nodes.length, g0.nodes.length); eq(g1.edge
 const routes = new Map()
 const fakeCtx = { webServer: { register({ path, handler }) { routes.set(path, handler); return () => routes.delete(path) } } }
 const api = registerWebApi(fakeCtx, { root, log: () => {}, version: '0.2.0' })
-t('注册了 26 条路由', () => eq(routes.size, 26))
+t('注册了 33 条路由', () => eq(routes.size, 33))
 
 let token = ''
 const call = (p, { method = 'GET', body, headers = {}, auth = true } = {}) => new Promise((resolve) => {
@@ -263,6 +263,33 @@ t('/health 返回体检单', () => {
   eq(health.ok, true)
   ok(health.totals && Number.isFinite(health.totals.live), '缺 totals.live')
   ok(Array.isArray(health.scopes), 'scopes 不是数组')
+})
+const backup = await call('/backup/export')
+t('/backup/export 返回 JSON 包', () => {
+  eq(backup.ok, true)
+  ok(backup.filename && backup.filename.endsWith('.json'), '缺 filename')
+  eq(backup.data.format, 'whale-memory-bundle')
+  ok(Array.isArray(backup.data.scopes), '缺 scopes')
+})
+const backupDry = await call('/backup/import', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: { data: backup.data, dryRun: true },
+})
+t('/backup/import 预演', () => {
+  eq(backupDry.ok, true)
+  eq(backupDry.dryRun, true)
+  ok(backupDry.totals && Number.isInteger(backupDry.totals.added), '缺 totals')
+})
+const recallDry = await call('/import/history', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: { dir: join(root, 'no-sessions'), dryRun: true },
+})
+t('/import/history 预演', () => {
+  eq(recallDry.ok, true)
+  eq(recallDry.dryRun, true)
+  eq(recallDry.totals.scanned, 0)
 })
 
 api.dispose()

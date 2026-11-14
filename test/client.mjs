@@ -98,7 +98,7 @@ t('没 slots 服务时安静退出', () => {
 // 页面组件是函数内部声明，正常不导出；测试时从源码尾巴补一个出口，
 // 用带状态的样例把每页真跑一遍——只在 Section 层看树，抓不到页面自己的引用错误。
 t('各页面带数据能渲染（不引用外部未定义变量）', () => {
-  const pageSrc = src.replace('exports.apply = apply', 'exports.__pages = { 总览页, 运行页, 记忆页, 审计页, 图谱页, 模型页 }\n    exports.apply = apply')
+  const pageSrc = src.replace('exports.apply = apply', 'exports.__pages = { 总览页, 运行页, 记忆页, 审计页, 图谱页, 模型页, 数据备份页 }\n    exports.apply = apply')
   ok(pageSrc !== src, '没找到导出标记')
   vm.runInContext(pageSrc, sandbox, { filename: 'client-pages.js' })
   const def = registrations[registrations.length - 1]
@@ -123,7 +123,11 @@ t('各页面带数据能渲染（不引用外部未定义变量）', () => {
   const 观察 = {
     persona: {
       exists: true, version: 3, tokens: 800, limit: 1200,
-      budget: { tokens: 1182, limit: 1200, headroom: 18, compactible: 15, effective: 33, basis: 1167 },
+      budgetConfig: { mode: 'auto', tokens: 1200, window: 128000, share: 0.01 },
+      budget: {
+        tokens: 1182, limit: 1200, headroom: 18, compactible: 15, effective: 33, basis: 1167,
+        mode: 'auto', source: 'settings', window: 128000, share: 0.01, why: '',
+      },
       audit: [
         { i: 0, text: '不分析：他没问「为什么」「怎么办」，就别解释原因。', chars: 98, flag: 'verbose', why: '偏长（98 字）', suggestion: '去掉不含约束词的解释尾巴' },
         { i: 1, text: '例：', chars: 2, flag: 'example', why: '示例行', suggestion: '可压成一条指引' },
@@ -134,10 +138,19 @@ t('各页面带数据能渲染（不引用外部未定义变量）', () => {
       proposal: {
         at: '2026-11-12T00:59:25.575Z', generator: 'rules(fallback)', reviewer: 'rules',
         samples: { count: 12, skipped: 167, skipReasons: { style: 120, command: 47 } },
-        budget: { tokens: 1182, limit: 1200, headroom: 18, compactible: 15, reclaimable: 12, effective: 45, basis: 1167 },
+        budget: {
+          tokens: 1182, limit: 1200, headroom: 18, compactible: 15, reclaimable: 12, effective: 45, basis: 1167,
+          mode: 'auto', source: 'settings', window: 128000, share: 0.01, why: '',
+        },
         additions: [{ rule: '少用 emoji', evidence: 2, refs: [{ id: 'm_1', text: '以后别用 emoji' }] }],
-        compressions: [{ old: '不分析：他没问「为什么」「怎么办」，就别解释。', rule: '不分析：他没问，就别解释。', why: '偏长；去掉不含约束词的举例列举', flag: 'verbose', freed: 15 }],
-        replacements: [{ old: 'emoji 偶尔点缀，一条最多一种。', rule: 'emoji 一条最多一个，正事不用。', why: '同一主题「emoji」', freed: 12 }],
+        compressions: [{ old: '不分析：他没问「为什么」「怎么办」，就别解释。', rule: '不分析：他没问，就别解释。', why: '偏长；去掉不含约束词的举例列举', flag: 'verbose', source: 'llm', freed: 15 }],
+        replacements: [{ old: 'emoji 偶尔点缀，一条最多一种。', rule: 'emoji 一条最多一个，正事不用。', why: '同一主题「emoji」', source: 'candidate', freed: 12 }],
+        triage: [
+          { i: 0, text: '不分析：他没问「为什么」「怎么办」，就别解释原因。', action: 'shorten', rule: '不分析：他没问，就别解释。', why: '举例可删', ok: true, whyDropped: '' },
+          { i: 1, text: 'emoji 偶尔点缀，一条最多一种。', action: 'replace', rule: 'emoji 一条最多一个，正事不用。', why: '换个说法更省', ok: true, whyDropped: '' },
+          { i: 2, text: '说话短一点。', action: 'keep', rule: '', why: '本来就很短', ok: true, whyDropped: '' },
+        ],
+        triageSummary: { lines: 3, returned: true, keep: 1, shorten: 1, replace: 1, invalid: 0 },
         audit: [
           { i: 0, text: '不分析：他没问「为什么」「怎么办」，就别解释原因。', chars: 98, flag: 'verbose', why: '偏长（98 字）', suggestion: '去掉不含约束词的解释尾巴' },
           { i: 1, text: '例：', chars: 2, flag: 'example', why: '示例行', suggestion: '可压成一条指引' },
@@ -191,6 +204,7 @@ t('各页面带数据能渲染（不引用外部未定义变量）', () => {
         候选: null, 探测中: false, 忙: false, 结果: null,
       },
     }],
+    ['数据备份页', {}],
   ]
   for (const [名, props] of 用例) {
     ok(typeof pages[名] === 'function', `没取到 ${名}`)
@@ -200,6 +214,49 @@ t('各页面带数据能渲染（不引用外部未定义变量）', () => {
       throw new Error(`${名} 渲染失败：${String(e?.message ?? e)}`)
     }
   }
+
+  const 文本 = []
+  const 收集 = (node) => {
+    if (node == null || typeof node === 'boolean') return
+    if (typeof node === 'string' || typeof node === 'number') { 文本.push(String(node)); return }
+    if (Array.isArray(node)) { node.forEach(收集); return }
+    if (typeof node === 'function') { 收集(node({})); return }
+    if (node.type === 'F') { 收集(node.children); return }
+    if (typeof node.type === 'function') { 收集(node.type(node.props)); return }
+    收集(node.children)
+    if (node.props && node.props.children) 收集(node.props.children)
+  }
+  收集(pages.运行页({ 观察 }))
+  const 全 = 文本.join(' ')
+  ok(全.includes('必须保留'), '提案区没有「必须保留」分类')
+  ok(全.includes('自动'), '预算卡没显示自动模式')
+  ok(全.includes('设置页'), '预算来源没显示')
+
+  // 迭代卡的第一屏只回答「有没有提案、下一步做什么」
+  const 渲染文本 = (props) => {
+    文本.length = 0
+    收集(pages.运行页(props))
+    return 文本.join(' ')
+  }
+  ok(全.includes('有一份提案等你确认'), '有待确认提案时没给结论行')
+  ok(全.includes('本轮提案明细'), '提案明细没有折叠标题')
+  ok(全.includes('上次迭代结果'), '上次迭代结果没折叠')
+
+  const 空提案观察 = JSON.parse(JSON.stringify(观察))
+  Object.assign(空提案观察.persona.proposal, {
+    additions: [], replacements: [], compressions: [], triage: [], triageSummary: null,
+  })
+  ok(渲染文本({ 观察: 空提案观察 }).includes('刚跑过一轮'), '空提案没说清结论')
+
+  const 无提案观察 = JSON.parse(JSON.stringify(观察))
+  delete 无提案观察.persona.proposal
+  无提案观察.persona.auto.waitReason = '还差 75 条新消息'
+  ok(渲染文本({ 观察: 无提案观察 }).includes('还没出提案：还差 75 条新消息'), '没提案时没显示等待原因')
+
+  const 关自动观察 = JSON.parse(JSON.stringify(观察))
+  delete 关自动观察.persona.auto
+  delete 关自动观察.persona.proposal
+  ok(渲染文本({ 观察: 关自动观察 }).includes('人格自动迭代没开'), '自动关了没明确说')
 })
 
 console.log(`\n${pass} 通过 · ${fail} 失败`)

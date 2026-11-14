@@ -18,6 +18,7 @@ import {
 } from '../../lib/inject.js'
 import { registerTools } from '../../lib/tools.js'
 import { addItem, loadScope, saveScope } from '../../lib/store.js'
+import { preloadTrust } from '../../lib/trust.js'
 import { vaultPaths } from '../../lib/vault.js'
 import { estimateTokens } from './harness.mjs'
 
@@ -188,6 +189,8 @@ export async function runChannelChecks({ root, bridgeSid, scope, nonBridgeSid = 
     await mkdir(pr, { recursive: true })
     const file = join(pr, 'persona.md')
     await writeFile(file, '人格A', 'utf8')
+    // 独立根也要先预载信任缓存：inject 的同步回调只认缓存，没预热会按不可信跳过
+    await preloadTrust(pr)
     resetCaches()
     const h1 = makeHost()
     const off1 = registerInjection(h1.ctx, { root: pr, log: logOf(h1) })

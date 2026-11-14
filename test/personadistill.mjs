@@ -81,6 +81,7 @@ try {
             content: JSON.stringify({
               additions: [
                 { rule: '怼人可以，但不揭短，对方难受了就收手', evidence: [a.id] },
+                { rule: '以后少用 emoji 和颜文字，正事别用', evidence: [a.id] },
                 { rule: '以后都用本鲸自称', evidence: ['m_fake'] },
                 { rule: '昨天那件事以后别做', evidence: [a.id] },
               ],
@@ -90,11 +91,13 @@ try {
       }),
     }
   }
+  let 审查输入 = []
   const reviewStub = (approve, why = '') => async (_url, init) => {
     const body = JSON.parse(init.body)
     assert.equal(body.model, 'stub-rev')
     const content = String(body.messages?.[1]?.content ?? '')
     const candidates = JSON.parse(content).candidates || []
+    审查输入 = candidates
     return {
       ok: true,
       json: async () => ({
@@ -133,7 +136,13 @@ try {
   assert.equal(p2.reviewer, 'llm(separate)', JSON.stringify(p2.reviewer))
   assert.ok(!p2.additions.some((x) => x.rule.includes('不揭短')), JSON.stringify(p2.additions))
   assert.ok(p2.rejected.some((x) => /审查模型/.test(x.why)), JSON.stringify(p2.rejected))
-  ok('审查：独立模型否决后不进提案，理由留档')
+  // 审查模型必须看到 old→new，否则判断不了替换有没有换主题
+  const 替换输入 = 审查输入.find((c) => c.kind === 'replace')
+  assert.ok(替换输入, '替换候选要送审：' + JSON.stringify(审查输入))
+  assert.ok(String(替换输入.old).includes('emoji'), '审查请求要带 old：' + JSON.stringify(替换输入))
+  assert.ok(替换输入.rule.includes('正事别用'), JSON.stringify(替换输入))
+  assert.ok(审查输入.filter((c) => c.kind === 'add').every((c) => c.old === ''), '追加候选不该带 old')
+  ok('审查：独立模型否决后不进提案，理由留档；替换候选带 old→new 送审')
 
   // 审查器挂了：不阻塞提案，降级为确定性审查
   const p3 = await propose(root, { fetchImpl: router(async () => ({ ok: false, json: async () => ({}) })) })

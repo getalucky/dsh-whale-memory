@@ -19,8 +19,9 @@ import {
   propose, applyProposal, rollback, status, parsePersona, personaTokens,
   stripMarkers, hashOf, findReplacement, PERSONA, estimateTokens,
 } from '../lib/persona.js'
-import { inspectEvolvable, collectCompressions, ruleCompact, validateCompact } from '../lib/personaaudit.js'
+import { inspectEvolvable, collectCompressions, ruleCompact, validateCompact, validateReplace } from '../lib/personaaudit.js'
 import { runProbes } from '../lib/probes.js'
+import { personaBudget, personaBudgetConfig, setPersonaBudget } from '../lib/personalimit.js'
 
 let pass = 0
 const ok = (name) => { pass += 1; console.log('  ok', name) }
@@ -337,6 +338,121 @@ try {
     } finally {
       await rm(cr, { recursive: true, force: true }).catch(() => {})
     }
+  }
+
+  // ---- 预算解析：fixed / auto / 回退 / 钳制，进程内配置优先于 env ----
+  {
+    const keys = ['DSH_MEMORY_PERSONA_MODE', 'DSH_MEMORY_PERSONA_TOKENS', 'DSH_MEMORY_PERSONA_WINDOW', 'DSH_MEMORY_PERSONA_SHARE']
+    const saved = {}
+    for (const k of keys) { saved[k] = process.env[k]; delete process.env[k] }
+    try {
+      setPersonaBudget(null)
+      let b = personaBudget()
+      assert.equal(b.limit, 1200)
+      assert.equal(b.mode, 'fixed')
+      assert.equal(b.source, 'default')
+      assert.equal(personaBudgetConfig().mode, 'fixed')
+
+      setPersonaBudget({ mode: 'fixed', tokens: 1800 })
+      assert.equal(personaBudget().limit, 1800, '设置页固定额度要生效')
+      assert.equal(personaBudget().source, 'settings')
+      assert.equal(PERSONA.tokenLimit, 1800, 'PERSONA.tokenLimit 要跟着动，不能加载时冻死')
+
+      setPersonaBudget({ mode: 'auto', window: 128000, share: 0.01 })
+      b = personaBudget()
+      assert.equal(b.mode, 'auto')
+      assert.equal(b.limit, 1280, 'auto 按窗口 × 占比算')
+      assert.equal(personaBudgetConfig().mode, 'auto')
+
+      setPersonaBudget({ mode: 'auto', window: 0, share: 0 })
+      b = personaBudget()
+      assert.equal(b.mode, 'fixed', 'auto 缺窗口/占比要回退固定')
+      assert.ok(b.why, '回退要说明原因')
+      assert.equal(b.requestedMode, 'auto', '表单回填仍要保留用户选的模式')
+
+      setPersonaBudget({ mode: 'auto', window: 100, share: 0.9 })
+      b = personaBudget()
+      assert.equal(b.window, 1000, '窗口要钳下限')
+      assert.equal(b.share, 0.2, '占比要钳上限')
+      assert.equal(b.limit, 600, 'auto 算出的额度也要钳在 600–2400')
+
+      setPersonaBudget({ mode: 'fixed', tokens: 99999 })
+      assert.equal(personaBudget().limit, 2400)
+      setPersonaBudget({ mode: 'fixed', tokens: 1 })
+      assert.equal(personaBudget().limit, 600)
+
+      setPersonaBudget(null)
+      process.env.DSH_MEMORY_PERSONA_MODE = 'auto'
+      process.env.DSH_MEMORY_PERSONA_WINDOW = '64000'
+      process.env.DSH_MEMORY_PERSONA_SHARE = '0.02'
+      b = personaBudget()
+      assert.equal(b.mode, 'auto')
+      assert.equal(b.limit, 1280)
+      assert.equal(b.source, 'env', '没存设置时回落 env')
+      ok('预算解析：默认 / fixed / auto / 回退 / 钳制，设置优先于 env')
+    } finally {
+      setPersonaBudget(null)
+      for (const k of keys) {
+        if (saved[k] === undefined) delete process.env[k]
+        else process.env[k] = saved[k]
+      }
+    }
+  }
+
+  // ---- 模型替换校验：同主题、不变长、不丢约束、不带硬伤 ----
+  {
+    const oldLine = '少用 emoji 和颜文字，一条最多一个，正事时不用。'
+    const lines = [oldLine, '回答先给结论，别绕弯。']
+    const good = validateReplace(oldLine, '少用 emoji 和颜文字，一条最多一个。', lines)
+    assert.equal(good.ok, true, JSON.stringify(good))
+    assert.equal(good.rule, '少用 emoji 和颜文字，一条最多一个。')
+    assert.equal(validateReplace(oldLine, oldLine, lines).ok, false, '没变化要拒')
+    assert.equal(validateReplace(oldLine, '回答先给结论，别绕弯。', lines).ok, false, '换主题要拒')
+    assert.equal(validateReplace(oldLine, '少用 emoji 和颜文字，一条最多一个，正事时不用，昨天刚说过。', lines).ok, false, '带事件词要拒')
+    assert.equal(validateReplace(oldLine, '少用 emoji 和颜文字，一条最多一个，正事时不用，还要再补一大段解释把预算撑爆才满意。', lines).ok, false, '比旧说法长太多要拒')
+    assert.equal(validateReplace(oldLine, '少用 emoji 和颜文字，一条最多一个。', [oldLine, '少用 emoji 和颜文字，一条最多一个。']).ok, false, '和别的行重复要拒')
+    ok('validateReplace：同主题 / 不变长 / 约束词 / 硬伤 / 重复')
+  }
+
+  // ---- 模型三分类：keep 不整理，shorten 取最短，replace 单列，非法回退规则压缩 ----
+  {
+    const emojiLine = '少用 emoji 和颜文字，一条最多一个，正事时不用。'
+    const evo2 = [
+      emojiLine,
+      LONG_LINE,
+      '回答先给结论，别绕弯。',
+    ].join('\n')
+    const triage = [
+      { i: 0, action: '必须保留', why: '核心语气' },
+      { i: 1, action: 'shorten', text: '他没问就别分析、别解释、别给方案。', why: '去掉举例' },
+      { i: 2, action: 'replace', text: '先给结论，别绕弯子。', why: '更直接' },
+    ]
+    const r = collectCompressions(evo2, { triage })
+    assert.equal(r.keeps.length, 1, JSON.stringify(r.keeps))
+    assert.equal(r.keeps[0].text, emojiLine)
+    assert.ok(!r.compressions.some((c) => c.old === emojiLine), 'keep 行不许压缩')
+    assert.ok(!r.replacements.some((x) => x.old === emojiLine), 'keep 行不许替换')
+    assert.ok(r.compressions.some((c) => c.old === LONG_LINE && c.source === 'llm'), '模型 shorten 合法时要采用')
+    const rep = r.replacements.find((x) => x.old === '回答先给结论，别绕弯。')
+    assert.ok(rep && rep.source === 'llm', '模型 replace 要单独出替换建议：' + JSON.stringify(r.replacements))
+    assert.equal(rep.rule, '先给结论，别绕弯子。')
+    assert.ok(r.triage.every((t) => t.ok), '合法建议要标 ok：' + JSON.stringify(r.triage))
+
+    // 非法 shorten：记录 whyDropped，但回退到规则压缩，不能把这一行整条丢掉
+    const badShorten = collectCompressions(evo2, {
+      triage: [{ i: 1, action: 'shorten', text: '昨天刚说过。', why: '乱写' }],
+    })
+    assert.equal(badShorten.triage[0].ok, false)
+    assert.ok(badShorten.triage[0].whyDropped, '要给出校验失败原因')
+    assert.ok(badShorten.compressions.some((c) => c.old === LONG_LINE && c.source === 'rule'), '非法模型建议要回退规则压缩')
+
+    // 非法 replace：不产生替换，但该行的规则压缩仍然在
+    const badReplace = collectCompressions(evo2, {
+      triage: [{ i: 2, action: 'replace', text: '换个完全不同的话题。', why: '乱写' }],
+    })
+    assert.equal(badReplace.replacements.length, 0)
+    assert.ok(badReplace.triage.some((t) => t.action === 'replace' && !t.ok && t.whyDropped))
+    ok('collectCompressions：keep / shorten / replace / 非法回退')
   }
 
   console.log(`\n${pass} 通过 · 0 失败`)

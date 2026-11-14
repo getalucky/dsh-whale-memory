@@ -12,6 +12,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { registerTools } from '../lib/tools.js'
+import { renderRules } from '../lib/skeleton.js'
 import { createHarness } from './eval/harness.mjs'
 import { vaultPaths } from '../lib/vault.js'
 
@@ -25,6 +26,19 @@ try {
 
   assert.ok(tools.has('search_memory') && tools.has('read_memory') && tools.has('memory_recall'), [...tools.keys()].join(','))
   ok('工具注册：search_memory / read_memory / memory_recall')
+
+  // 注册失败：返回 failed，规矩段能据此降级
+  const t2 = registerTools({
+    tools: {
+      register(spec) {
+        if (spec.name === 'search_memory') throw new Error('boom')
+        return () => {}
+      },
+    },
+  }, { root: h.root, log: () => {} })
+  assert.ok(t2.failed.some((x) => x.name === 'search_memory'), JSON.stringify(t2.failed))
+  assert.match(renderRules({ toolsDown: true }), /记忆工具当前不可用/)
+  ok('工具注册失败：返回 failed，规矩段可降级')
 
   const c = {
     id: 't1',
@@ -67,11 +81,18 @@ try {
   assert.ok(cut.tokens <= 200, `${cut.tokens}`)
   ok('read_memory：单次 token 上限生效')
 
-  // 单回合读取配额（60 秒窗口近似）
-  const blocked = await tools.get('read_memory').execute({ id: hit.id })
+  // 重复读：同一条同 section 返回缓存提示，不重复展开正文
+  const again = await tools.get('read_memory').execute({ id: hit.id })
+  assert.equal(again.ok, true)
+  assert.equal(again.cached, true)
+  assert.ok(/刚读过/.test(again.text), again.text)
+  ok('read_memory：同一条重复读返回缓存提示')
+
+  // 不同 section 累计 3 次后拒绝（60 秒窗口近似）
+  const blocked = await tools.get('read_memory').execute({ id: hit.id, section: '场景' })
   assert.equal(blocked.ok, false)
-  assert.ok(/3 条/.test(blocked.why), blocked.why)
-  ok('read_memory：单回合 3 次上限')
+  assert.ok(/3 次/.test(blocked.why), blocked.why)
+  ok('read_memory：同一条 1 分钟 3 次上限')
 
   // usage 记录
   const p = vaultPaths(h.root, sc.kind, sc.id)
@@ -92,7 +113,7 @@ try {
   assert.equal(typeof sr.empty, 'boolean')
   const rr = rows.find((x) => x.kind === 'read' && x.ok)
   assert.ok(rr.id === hit.id && rr.tokens > 0, JSON.stringify(rr))
-  assert.ok(rows.some((x) => x.kind === 'read' && x.ok === false && /3 条/.test(x.why)),
+  assert.ok(rows.some((x) => x.kind === 'read' && x.ok === false && /3 次/.test(x.why)),
     '被配额挡掉的那次也要留痕')
   ok('读账：search/read/profile 都落 reads.jsonl，失败分支也有')
 
@@ -131,6 +152,23 @@ try {
   assert.ok(one.text.includes('避免亮色闪眼'), one.text)
   assert.ok(one.scene.includes('设置页'), one.scene)
   ok('memory_save：merge_into 按语义合并，不新建重复条目')
+
+  // 7 天内相似条目：软提示 merge_into，不硬拦
+  // 两句 Jaccard 0.545：低于近重复档 0.55 不会自动合并，但高于软提示线 0.5
+  const first = await tools.get('memory_save').execute({
+    text: '用户周末去江边钓鱼，清早出发，带折叠椅',
+    kind: 'pref',
+    source_quote: '周末我一般清早就去江边钓鱼',
+  })
+  assert.ok(first.ok && first.id, JSON.stringify(first))
+  const near = await tools.get('memory_save').execute({
+    text: '用户喜欢周末去江边钓鱼，清早出发，带保温杯',
+    kind: 'pref',
+    source_quote: '周末钓鱼我都自己带杯热水',
+  })
+  assert.ok(near.ok && near.id && near.id !== first.id, JSON.stringify(near))
+  assert.ok(near.hint && near.hint.includes(first.id), JSON.stringify(near))
+  ok('memory_save：7 天内相似条目给 merge_into 软提示')
 
   console.log(`\n${pass} 通过 · 0 失败`)
 } finally {

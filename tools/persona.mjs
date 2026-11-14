@@ -21,10 +21,14 @@ import {
   readPersona, parsePersona, PERSONA,
 } from '../lib/persona.js'
 import { inspectEvolvable } from '../lib/personaaudit.js'
+import { loadSettings } from '../lib/settings.js'
+import { setPersonaBudget } from '../lib/personalimit.js'
 
 const root = process.env.DSH_MEMORY_HOME || rootDir()
 const [cmd = 'status', ...args] = process.argv.slice(2)
 await ensureDirs(root)
+// CLI 也认设置页存的额度；没存就回落到环境变量 / 默认值
+setPersonaBudget(loadSettings(root).persona_budget || null)
 
 const flag = (name) => args.includes(name)
 const positional = args.filter((x) => !x.startsWith('--'))
@@ -43,17 +47,20 @@ try {
     if (a.waitReason) console.log(`当前状态：${a.waitReason}`)
     if (s.budget) {
       const b = s.budget
-      console.log(`人格预算：${b.tokens}/${b.limit} tok，当前剩 ${b.headroom} tok`)
+      const 来源 = { settings: '设置页', env: '环境变量', default: '默认值' }[b.source] || b.source
+      const 模式 = b.mode === 'auto' ? `自动 ${b.window} × ${(b.share * 100).toFixed(2)}%` : `固定 ${b.tokens}`
+      console.log(`人格预算：${b.tokens}/${b.limit} tok（${模式} · 来源 ${来源}），当前剩 ${b.headroom} tok`)
+      if (b.why) console.log(`  注意：${b.why}`)
       console.log(`  整理后可用：${b.effective} tok（现在就能压缩出 +${b.compactible}；下一轮提案还可能再靠替换腾出更多）`)
       console.log(`  写入新规矩时按「先收拾旧人设」后的 ${b.basis} tok 做审查，不是一味按当前占用追加`)
-      if (b.headroom < 30) console.log('  当前额度见底；优先采纳压缩/替换，或调大 DSH_MEMORY_PERSONA_TOKENS')
+      if (b.headroom < 30) console.log('  当前额度见底；优先采纳压缩/替换，或到设置页 / DSH_MEMORY_PERSONA_TOKENS 调大额度')
     }
     if (s.audit?.length) {
       const a = s.audit
       const n = (f) => a.filter((r) => r.flag === f).length
       console.log(`旧人设审视（实时）：${a.length} 行 · 偏长 ${n('verbose')} · 示例 ${n('example')} · 疑似重复 ${n('redundant')} · 精简 ${n('keep')} · 现在能压 ${s.compressible?.length || 0} 行`)
     }
-    console.log(`预算可用 DSH_MEMORY_PERSONA_TOKENS 调（600–2400，默认 1200；每轮会话都会注入，调大更费上下文）`)
+    console.log(`预算在设置页「人格预算」改，或配 DSH_MEMORY_PERSONA_MODE/TOKENS/WINDOW/SHARE（600–2400；每轮会话都会注入，调大更费上下文）`)
     if (a.lastRunAt) console.log(`上次提案：${a.lastRunAt}`)
     const last = (s.recentRuns || [])[0]
     if (last) {
@@ -94,7 +101,7 @@ try {
     for (const run of runs) {
       console.log(`\n── ${run.at}${run.legacy ? '（由旧提案反推）' : ''}（${run.rows.length} 条）`)
       for (const d of run.rows) {
-        const mark = d.action === 'accepted' ? '+' : d.action === 'replaced' ? '~' : d.action === 'compressed' ? '<' : '✗'
+        const mark = d.action === 'accepted' ? '+' : d.action === 'replaced' ? '~' : d.action === 'compressed' ? '<' : d.action === 'kept' ? '=' : '✗'
         console.log(`  ${mark} [${d.stage}] ${d.rule}`)
         console.log(`      ${d.why}`)
         if (d.evidence?.length) console.log(`      依据：${d.evidence.map((e) => `${e.id}${e.text ? `「${e.text}」` : ''}`).join('、')}`)
@@ -111,7 +118,14 @@ try {
     const outIdx = args.indexOf('--out')
     const out = outIdx >= 0 ? args[outIdx + 1] : join(root, PERSONA.proposal)
     console.log(`候选：新增 ${p.additions.length} · 替换 ${(p.replacements || []).length} · 压缩 ${(p.compressions || []).length} 条，证据 ${p.sources} 条记忆`)
-    console.log(`预算 ${p.budget.tokens}/${p.budget.limit} tok · 当前剩 ${p.budget.headroom} · 整理后可用 ${p.budget.effective} tok（审查基准 ${p.budget.basis}）`)
+    console.log(`预算 ${p.budget.tokens}/${p.budget.limit} tok（${p.budget.mode === 'auto' ? `自动 ${p.budget.window}×${p.budget.share}` : '固定'} · ${p.budget.source}）· 当前剩 ${p.budget.headroom} · 整理后可用 ${p.budget.effective} tok（审查基准 ${p.budget.basis}）`)
+    const ts = p.triageSummary
+    if (ts) {
+      console.log(`模型逐行分类：${ts.returned ? `保留 ${ts.keep} · 缩短 ${ts.shorten} · 替换 ${ts.replace}` : '没有返回'}${ts.invalid ? ` · 校验未过 ${ts.invalid}` : ''} / 共 ${ts.lines} 行`)
+      for (const t of (p.triage || []).filter((x) => !x.ok)) {
+        console.log(`  ✗ [${t.action}] ${t.text.slice(0, 60)} — ${t.whyDropped}`)
+      }
+    }
     if (p.audit?.length) {
       const n = (f) => p.audit.filter((r) => r.flag === f).length
       console.log(`旧人设审视 ${p.audit.length} 行：偏长 ${n('verbose')} · 示例 ${n('example')} · 疑似重复 ${n('redundant')} · 精简 ${n('keep')}`)
@@ -122,7 +136,7 @@ try {
       if (why.length) console.log(`  跳过原因：${why.map(([k, n]) => `${k} ${n}`).join(' · ')}`)
     }
     for (const r of p.compressions || []) {
-      console.log(`\n< 压缩旧规矩（腾出 ${r.freed} tok）[${r.flag}]`)
+      console.log(`\n< 压缩旧规矩（腾出 ${r.freed} tok）[${r.flag}]${r.source === 'llm' ? ' · 模型' : ''}`)
       console.log(`    旧：${r.old}`)
       console.log(`    新：${r.rule}`)
       console.log(`    ${r.why}`)
@@ -132,7 +146,7 @@ try {
       for (const e of a.evidence.slice(0, 3)) console.log(`    依据 ${e.id}：${e.text}`)
     }
     for (const r of p.replacements || []) {
-      console.log(`\n~ 替换（腾出 ${r.freed} tok）：`)
+      console.log(`\n~ 替换（腾出 ${r.freed} tok）${r.source === 'llm' ? ' · 模型' : ' · 候选'}：`)
       console.log(`    旧：${r.old}`)
       console.log(`    新：${r.rule}`)
       console.log(`    ${r.why}`)
