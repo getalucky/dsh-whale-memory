@@ -9,13 +9,15 @@
  * 基线口径：规则蒸馏 + 词法召回，不调 LLM。这样每次改动都能同口径对比。
  */
 
-import { mkdir, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { CASES } from './cases.mjs'
 import { createHarness, estimateTokens, itemsHit, textHit, readJson } from './harness.mjs'
 import { runChannelChecks } from './channel.mjs'
+import { listScopes } from '../../lib/store.js'
+import { INDEX_LIMIT, rebuildScope, verifyScope } from '../../lib/vault.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const reportsDir = join(here, 'reports')
@@ -231,7 +233,66 @@ async function previousReport(curFile) {
   }
 }
 
-function renderMarkdown({ at, rows, m, metrics, channel, prev }) {
+/**
+ * 副库重建校验（13.3）：主库是真源，重建前后条目、渲染、召回顺序都不能变。
+ * 只动各分片目录里的派生文件，主库正文不碰。
+ */
+async function rebuildChecks(h) {
+  const checks = []
+  const add = (name, ok, detail = '') => checks.push({ name, ok, detail })
+
+  const snap = async () => {
+    const items = []
+    const renders = []
+    const recalls = []
+    for (const c of CASES) {
+      const sc = await h.scopeOf(c.id)
+      items.push(`${sc.scope}#${(sc.items || []).length}`)
+      renders.push(await h.render(c.id))
+      if (c.ask) recalls.push((await h.search(c.id, c.ask)).map((r) => r.item.id).join('>'))
+    }
+    return { items, renders, recalls }
+  }
+
+  const before = await snap()
+  const scopes = await listScopes(h.root)
+  const results = []
+  for (const s of scopes) {
+    await rebuildScope(h.root, s.kind, s.id)
+    results.push({ scope: s.scope, ...(await verifyScope(h.root, s.kind, s.id)) })
+  }
+  const after = await snap()
+
+  const bad = results.filter((r) => !r.ok)
+  add('重建后主副库条目数一致', results.length > 0 && bad.length === 0,
+    bad.length ? bad.map((r) => `${r.scope} 文件 ${r.files} / 条目 ${r.items}`).join('；') : `${results.length} 个分片全过`)
+
+  const itemDiff = before.items.findIndex((t, i) => t !== after.items[i])
+  add('重建前后条目数不变', itemDiff < 0,
+    itemDiff < 0 ? `${before.items.length} 个分片` : `${before.items[itemDiff]} → ${after.items[itemDiff]}`)
+
+  const renderDiff = before.renders.findIndex((t, i) => t !== after.renders[i])
+  add('重建后注入渲染逐字一致', renderDiff < 0,
+    renderDiff < 0 ? '' : `用例 ${CASES[renderDiff]?.id} 渲染变了`)
+
+  const recallDiff = before.recalls.findIndex((t, i) => t !== after.recalls[i])
+  add('重建后召回 top8 顺序不变', recallDiff < 0,
+    recallDiff < 0 ? `${before.recalls.length} 条查询` : `第 ${recallDiff + 1} 条查询结果变了`)
+
+  let worst = 0
+  let worstScope = ''
+  for (const s of scopes) {
+    const size = await stat(join(h.root, 'scopes', `${s.kind}-${s.id}`, 'memory_index.md'))
+      .then((x) => x.size).catch(() => 0)
+    if (size > worst) { worst = size; worstScope = s.scope }
+  }
+  add(`副库 ≤ ${Math.round(INDEX_LIMIT / 1024)}KB`, worst <= INDEX_LIMIT,
+    `最大 ${worst} 字节${worstScope ? `（${worstScope}）` : ''}`)
+
+  return checks
+}
+
+function renderMarkdown({ at, rows, m, metrics, channel, rebuild = [], prev }) {
   const line = []
   line.push(`# 记忆插件评测基线 · ${at}`)
   line.push('')
@@ -279,6 +340,12 @@ function renderMarkdown({ at, rows, m, metrics, channel, prev }) {
     line.push('')
   }
 
+  line.push('## 副库重建')
+  line.push('')
+  for (const c of rebuild) {
+    line.push(`- ${c.ok ? 'OK' : 'FAIL'} ${c.name}${c.detail ? ` — ${c.detail}` : ''}`)
+  }
+  line.push('')
   line.push('## 通道体检')
   line.push('')
   for (const c of channel) {
@@ -319,12 +386,14 @@ async function main() {
     })
     const m = summarize(rows)
     const metrics = metricsOf(m, rows)
+    // 副库重建放在指标算完之后：重建只动派生层，指标必须原样不动
+    const rebuild = await rebuildChecks(h)
 
     const file = join(reportsDir, `run-${stamp()}.json`)
     const forFile = await previousReport(file)
-    const report = { version: 'eval-1', at, mode: 'rule+lexical', metrics, cases: rows, channel }
+    const report = { version: 'eval-1', at, mode: 'rule+lexical', metrics, cases: rows, channel, rebuild }
     await writeFile(file, JSON.stringify(report, null, 2), 'utf8')
-    await writeFile(join(reportsDir, 'latest.md'), renderMarkdown({ at, rows, m, metrics, channel, prev: forFile }), 'utf8')
+    await writeFile(join(reportsDir, 'latest.md'), renderMarkdown({ at, rows, m, metrics, channel, rebuild, prev: forFile }), 'utf8')
 
     console.log('\n—— 指标 ——')
     console.log(`写入召回 ${pct(metrics.writeRecallAll)}（规则 ${pct(metrics.writeRecallRule)} / 需模型 ${pct(metrics.writeRecallModel)}）`)
@@ -334,6 +403,9 @@ async function main() {
     console.log(`常驻注入（25 条）${metrics.injectTokens} tok`)
     const chFail = channel.filter((c) => !c.ok)
     if (chFail.length) console.log(`通道体检未过：${chFail.map((c) => c.name).join('、')}`)
+    const rbFail = rebuild.filter((c) => !c.ok)
+    console.log(`副库重建：${rebuild.length - rbFail.length}/${rebuild.length} 项通过`)
+    if (rbFail.length) console.log(`重建未过：${rbFail.map((c) => c.name).join('、')}`)
     console.log(`报告：${file}`)
 
     if (args.has('--compare') && forFile) {
@@ -345,7 +417,7 @@ async function main() {
         if (d && d !== '（持平）') console.log(`${k}: ${b[k]} → ${a[k]} ${d}`)
       }
     }
-    if (args.has('--strict') && m.cases.fail > 0) process.exitCode = 1
+    if (args.has('--strict') && (m.cases.fail > 0 || rbFail.length)) process.exitCode = 1
   } finally {
     await h.dispose()
   }
