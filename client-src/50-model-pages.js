@@ -55,7 +55,7 @@
         ? (候选.models || []).filter((m) => !['ok', 'limited', 'unusable'].includes(m.state))
         : []
 
-      return h('div', { className: 'wm-body' },
+      return h('div', null,
         WD.卡(名,
           h('div', null,
             WD.提(说明),
@@ -102,7 +102,6 @@
               )
               : null,
           ),
-          WD.徽(v.kind === 'search' ? '搜索' : '蒸馏', 'wm-badgeInfo'),
         ),
         h('details', { style: { padding: '0 2px' } },
           h('summary', { className: 'wm-hint', style: { cursor: 'pointer' } }, '配置位置'),
@@ -116,9 +115,8 @@
 
     /** 主动闲逛用的那一路 agent：配置存在 beat config 里，只有 model / provider。 */
     function 闲逛模型卡({ 态, 表单, 改表单, 保存, 结果, 忙 }) {
-      if (!表单) return WD.卡('闲逛 agent 模型', WD.提('读取主动行为配置…'))
+      if (!表单) return WD.卡('思考模型', WD.提('读取主动行为配置…'))
       const f = 表单
-      const c = (态 && 态.config) || {}
       const ad = (态 && 态.agentDefault) || null
       const 改 = (k, v) => 改表单(Object.assign({}, f, { [k]: v }))
       const 文 = (k, 标签, 提示) =>
@@ -132,33 +130,26 @@
             onChange: (e) => 改(k, e.target.value),
           }),
         )
-      return h('div', { className: 'wm-body' },
-        WD.卡('闲逛 agent 模型',
-          h('div', null,
-            WD.提('默认走这条：在宿主里真开一路 agent。你在下面选的模型只负责“想搜什么、怎么整理”，它自己不联网；真正联网搜索由 DSH 的 web_search 完成，默认走 DeepSeek 搜索 provider，单独消耗 DEEPSEEK_API_KEY。'),
-            WD.提('这里填的是 DSH 里已经配好的 provider id / model id，不是 API 地址或 Key；留空就跟宿主当前默认。'),
+      return WD.卡('思考模型',
+        h('div', null,
+          WD.提('填 DSH 里已经配好的 id，不是地址或 Key；留空就跟宿主当前默认。'),
+          文('model', 'model', '留空跟全局默认'),
+          文('provider', 'provider', '留空跟全局默认'),
+          h('div', { className: 'wm-saveBar', style: { marginTop: 12 } },
+            h('button', { className: 'wm-btn wm-btnPrimary', disabled: 忙, onClick: 保存 },
+              忙 ? '保存中…' : '保存'),
             ad
-              ? WD.提(`宿主当前默认：${ad.provider || '?'} / ${ad.model || '?'}`)
-              : WD.提('宿主没报当前默认模型；可以留空，或先在 DSH 的模型设置里配好 provider。'),
-            文('model', 'model（宿主 model id）', '留空跟全局默认；只影响宿主里跑的那一路'),
-            文('provider', 'provider（宿主 provider id）', '留空跟全局默认'),
-            h('div', { className: 'wm-saveBar', style: { marginTop: 12 } },
-              h('button', { className: 'wm-btn wm-btnPrimary', disabled: 忙, onClick: 保存 },
-                忙 ? '保存中…' : '保存'),
-              ad
-                ? h('button', {
-                  className: 'wm-btn',
-                  disabled: 忙,
-                  onClick: () => 改表单(Object.assign({}, f, { provider: ad.provider || '', model: ad.model || '' })),
-                }, '填入当前默认')
-                : null,
-              WD.徽(c.model || '跟全局默认', c.model ? 'wm-badgeInfo' : 'wm-badgeOff'),
-            ),
-            结果 ? h('div', { className: 'wm-notice ' + (结果.ok ? 'wm-good' : 'wm-bad') }, 结果.text) : null,
+              ? h('button', {
+                className: 'wm-btn',
+                disabled: 忙,
+                onClick: () => 改表单(Object.assign({}, f, { provider: ad.provider || '', model: ad.model || '' })),
+              }, '填入当前默认')
+              : null,
+            ad
+              ? h('span', { className: 'wm-hint' }, `宿主当前默认：${ad.provider || '?'} / ${ad.model || '?'}`)
+              : h('span', { className: 'wm-hint' }, '宿主没报当前默认，留空也行'),
           ),
-        ),
-        h('div', { style: { padding: '0 2px' } },
-          WD.提('要换 agent 的思考模型：先在 DSH 的模型/provider 设置里把它配好，再回这里填 provider id + model id。要换真正联网的搜索通道，去 DSH 插件 → 网页搜索；这里不填搜索 key。'),
+          结果 ? h('div', { className: 'wm-notice ' + (结果.ok ? 'wm-good' : 'wm-bad') }, 结果.text) : null,
         ),
       )
     }
@@ -171,9 +162,9 @@
         if (v !== 引擎 && !闲逛.忙) 切引擎(v)
       }
       return h('div', null,
-        WD.卡('用什么找素材',
+        WD.卡(null,
           h('div', null,
-            h('div', { className: 'wm-subtabs', style: { marginBottom: 8 } },
+            h('div', { className: 'wm-subtabs', style: { marginBottom: 10 } },
               h('button', {
                 className: 'wm-subtab' + (引擎 === 'agent' ? ' wm-subtabOn' : ''),
                 disabled: 闲逛.忙,
@@ -186,19 +177,20 @@
               }, '直连搜索模型'),
             ),
             WD.提(引擎 === 'agent'
-              ? '默认：在宿主里真开一路 agent。下面选的模型负责想搜什么、怎么整理，不负责联网；真正搜索走 DSH 的 web_search（默认 DeepSeek 搜索 provider，单独用 DEEPSEEK_API_KEY），会翻 3–5 轮再回来。'
-              : '备选：不开 agent，把 prompt 直接发给下面这个模型，一问一答。它必须自带联网能力（Kimi / 智谱联网 / OpenRouter :online 之类）；只发一轮，不联网的模型会返回空。'),
-            WD.提('费用也不一样：agent 模式 = 思考模型 token + 每次 web_search 的搜索模型 token；直连模式 = 只算你填的搜索模型 token。'),
+              ? '宿主里开一路 agent：它决定搜什么、怎么整理，联网交给 DSH 的 web_search，翻 3–5 轮回来。'
+              : '不开 agent：prompt 直接发给下面这个模型，一问一答；它得自带联网，否则返回空并自动退回 agent。'),
+            WD.提(引擎 === 'agent'
+              ? '成本：思考模型 + 每次 web_search 的搜索模型'
+              : '成本：只算下面这个搜索模型', { marginTop: 4 }),
             结果 ? h('div', { className: 'wm-notice ' + (结果.ok ? 'wm-good' : 'wm-bad') }, 结果.text) : null,
           ),
-          WD.徽(引擎 === 'agent' ? '当前：agent' : '当前：直连', 'wm-badgeInfo'),
         ),
         引擎 === 'agent'
           ? h(闲逛模型卡, 闲逛)
           : h(模型配置卡, Object.assign({}, 搜索, {
-            名: '直连搜索模型',
+            名: '搜索模型',
             成功话: `通了 · ${(搜索.结果 && 搜索.结果.ms) || 0}ms · 下一跳闲逛就用这个模型联网找素材`,
-            说明: '必须填「自己能联网」的模型（Kimi / 智谱联网 / OpenRouter :online 之类）。它既搜也整理，只发一轮、不会调工具；没有第二个模型帮忙整理，不联网或没配好会返回空并自动回退闲逛 agent。',
+            说明: '端点填这个搜索模型自己的服务地址，和蒸馏 / 向量互不影响。',
           })),
       )
     }
@@ -283,3 +275,4 @@
     }
 
     /** 主动行为层的表单：配置文件是对象/数组，界面用字符串。 */
+
