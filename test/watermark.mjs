@@ -15,6 +15,7 @@ import { createHarness } from './eval/harness.mjs'
 import { readStagingLines, consumeStaging } from '../lib/ingest.js'
 import { distillSession } from '../lib/distill.js'
 import { paths } from '../lib/store.js'
+import { noteTurn, shouldReview, clearReview } from '../lib/turns.js'
 
 let pass = 0
 const ok = (name) => { pass += 1; console.log('  ok', name) }
@@ -71,6 +72,29 @@ try {
   assert.ok(retry.merged >= 1, '重跑应该走合并')
   assert.equal((await h.scopeOf('w1')).items.length, sc.items.length)
   ok('落盘后崩溃重跑：合并去重，不重复记')
+
+  // 回合内审查（文档 12.7）：只数真实回合，产出全部进 suggested
+  for (let i = 1; i <= 9; i += 1) noteTurn('w2', { kind: 'local' })
+  assert.equal(shouldReview('w2', 10), false)
+  noteTurn('w2', { kind: 'local' })
+  assert.equal(shouldReview('w2', 10), true)
+  clearReview('w2')
+  assert.equal(shouldReview('w2', 10), false)
+
+  const c2 = { id: 'w2', turns: ['记住，我下周三出差', '记住，我对花生过敏'] }
+  const h2 = await createHarness([c2])
+  try {
+    await h2.feed(c2)
+    const sid2 = [...h2.src.values()][0].sid
+    const r2 = await distillSession(h2.root, sid2, { log: () => {}, suggestedOnly: true })
+    assert.equal(r2.ok, true, JSON.stringify(r2))
+    const sc2 = await h2.scopeOf('w2')
+    assert.ok(sc2.items.length >= 1, JSON.stringify(sc2.items))
+    assert.ok(sc2.items.every((x) => x.state === 'suggested'), sc2.items.map((x) => x.state).join(','))
+  } finally {
+    await h2.dispose()
+  }
+  ok('回合内审查：10 个用户回合计一次，产出只进 suggested')
 
   console.log(`\n全部通过：${pass} 项`)
 } catch (e) {

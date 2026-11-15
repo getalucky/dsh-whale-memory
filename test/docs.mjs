@@ -10,9 +10,11 @@ import { join } from 'node:path'
 import {
   DOC_LIMIT, DOC_INJECT, addEntry, parseDoc, readDoc, loadDocs,
   recordOutcome, promoteMemory, selectEntries, renderDocsBlock, docPath,
+  identityEntries, renderIdentity, IDENTITY,
 } from '../lib/agentdoc.js'
 import { ensureDirs, emptyScope, addItem, saveScope } from '../lib/store.js'
 import { confirmItem } from '../lib/confirm.js'
+import { renderStatus } from '../lib/vault.js'
 
 let pass = 0
 let fail = 0
@@ -118,6 +120,38 @@ await t('确认闸门转正后自动沉淀', async () => {
   ok(r.ok, r.why)
   const text = await readFile(docPath(root, 'user'), 'utf8')
   ok(text.includes('喝乌龙茶') && text.includes(it.id), text)
+})
+
+await t('身份锚点：只挑 3 条、单条 160、整块 640', () => {
+  const entries = [
+    { type: '背景', text: '背景', review: false },
+    { type: '偏好', text: '偏好一', review: false },
+    { type: '红线', text: '红线一', review: false },
+    { type: '习惯', text: '习惯一', review: false },
+    { type: '偏好', text: '待复核那条', review: true },
+  ]
+  const picked = identityEntries({ user: { entries } })
+  ok(picked.length === 3, `挑了 ${picked.length} 条`)
+  ok(picked[0].type === '红线' && picked[1].type === '偏好', picked.map((x) => x.type).join(','))
+  const block = renderIdentity({ user: { entries: entries.map((e, i) => ({ ...e, text: e.text + 'x'.repeat(i === 1 ? 300 : 0) })) } })
+  ok(block.text.length <= IDENTITY.maxChars + 40, `块 ${block.text.length} 字符`)
+  ok(block.text.includes('【身份锚点'), block.text.slice(0, 40))
+})
+
+await t('身份锚点与 USER 画像不重复', () => {
+  const entries = [
+    { type: '偏好', text: '回答先给结论', review: false },
+    { type: '偏好', text: '不要在回复里做免责声明', review: false },
+  ]
+  const docs = { user: { entries }, agent: { entries: [] } }
+  const identity = renderIdentity(docs)
+  const block = renderDocsBlock(docs, { excludeUser: identity.texts })
+  ok(!block.includes('回答先给结论'), block)
+})
+
+await t('status.md 能带只读附加行（当前心情）', () => {
+  const text = renderStatus(emptyScope('private', '1', '用户 1'), { extra: ['当前心情：得意（轻）'] })
+  ok(text.includes('- 当前心情：得意（轻）'), text)
 })
 
 await rm(root, { recursive: true, force: true }).catch(() => {})

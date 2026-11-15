@@ -392,6 +392,8 @@
       const 今日 = Number(s.daily?.sent) || 0
       const 上限 = Number(c.maxDailySend) || 0
       const 比例 = 上限 > 0 ? Math.min(1, 今日 / 上限) : 0
+      const 指标 = b.metrics || null
+      const 百分比 = (v) => (v == null ? '—' : `${Math.round(Number(v) * 100)}%`)
       const 素材源 = { all: '全部', chat: '会话', web: '搜索', public: '公共' }
       const 素材 = (Array.isArray(b.materials) ? b.materials : [])
         .filter((m) => 素材筛 === 'all' || String(m.source || '').startsWith(素材筛))
@@ -482,6 +484,16 @@
             ? h('div', { className: 'wm-notice wm-warn' }, `今天投递失败：${s.deliveryFailed.why || '未知'} · 今天不再重试同一目标`)
             : null,
         ),
+        指标 ? 卡('验收指标 · 近 30 天',
+          h('div', { className: 'wm-grid wm-tiles4' },
+            格('素材采纳率', 百分比(指标.adoption), `${指标.materialsDelivered} 条投出去的素材`),
+            格('报账率', 百分比(指标.reportRate), `未报账 ${指标.unreported}`),
+            格('误投率', 百分比(指标.negativeRate), `${指标.negative} 次负反馈`),
+            格('闸门拦截', 百分比(指标.gateBlockRate), `${指标.gateTicks} 跳`),
+            格('画像证据', 指标.profileEvidence ? '齐全' : '缺证据', '每项都要有 evidenceIds'),
+            格('人格污染', 指标.personaPollution ? `${指标.personaPollution} 处` : '0', '素材不该进人格/画像'),
+          ),
+        ) : null,
         卡('最近投递 · 反馈账本',
           h('div', null,
             WD.提('每一跳主动投递的结果，和之后的反应。反馈只调素材权重，不写偏好。'),

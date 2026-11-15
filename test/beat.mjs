@@ -917,6 +917,17 @@ async function main() {
       assert.equal(sessionEventCount({ events: [1, 2, 3] }), 3)
     }
 
+    // 13.16 指标：同一份账本能算出采纳/报账/闸门，不因缺数据崩
+    {
+      const { beatMetrics } = await import('../lib/beat/metrics.js')
+      const m = await beatMetrics(root, { days: 3650 })
+      assert.equal(typeof m.deliveries, 'number')
+      assert.ok(m.material.total >= 0)
+      assert.equal(m.personaPollution, 0)
+      assert.ok(m.adoption === null || typeof m.adoption === 'number')
+      assert.ok(m.reportRate === null || typeof m.reportRate === 'number')
+    }
+
     console.log('beat ok')
   } finally {
     await rm(root, { recursive: true, force: true })

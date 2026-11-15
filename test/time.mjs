@@ -16,7 +16,7 @@ const cfgFile = join(root, 'qq-bridge-config.json')
 await writeFile(cfgFile, JSON.stringify({ 绑定: [{ 类型: '私聊', 号码: '123456789', 会话: 'sess-time-1', 称呼: '老爹' }] }), 'utf8')
 process.env.DSH_QQ_BRIDGE_CONFIG = cfgFile
 
-const { resolveRelativeTime, formatAbs } = await import('../lib/time.js')
+const { resolveRelativeTime, formatAbs, validityOf, timeVisible } = await import('../lib/time.js')
 const { guardPromptText, renderMemory } = await import('../lib/inject.js')
 const { ensureDirs, loadScope, paths } = await import('../lib/store.js')
 const { distillSession } = await import('../lib/distill.js')
@@ -86,6 +86,24 @@ try {
   const out = renderMemory(sc)
   assert.ok(out.includes('10-31 08:30'), out)
   ok('蒸馏按消息时间锚定')
+
+  // 双时间轴（文档 12.7）：未生效的不提前当事实，过期的直接不可见
+  const now = Date.parse('2026-11-15T12:00:00')
+  assert.equal(validityOf({}, now), 'unknown')
+  assert.equal(validityOf({ validFrom: '2026-11-16' }, now), 'not_yet')
+  assert.equal(validityOf({ validFrom: '2026-11-01', expiresAt: '2026-11-30' }, now), 'active')
+  assert.equal(validityOf({ expiresAt: '2026-11-14' }, now), 'expired')
+  assert.equal(validityOf({ expiresAt: '2026-11-15' }, now), 'active', '当天到期不该中午就消失')
+  assert.equal(timeVisible({ validFrom: '2026-11-16' }, now), false)
+  assert.equal(timeVisible({}, now), true, '没有时间窗的条目照常可用')
+  ok('validity 四态与时间窗过滤')
+
+  const { checkReplyBudget } = await import('../lib/replybudget.js')
+  assert.equal(checkReplyBudget('group', '好').ok, true)
+  assert.equal(checkReplyBudget('group', '这是一句明显超过十五个字的群聊回复内容').ok, false)
+  assert.equal(checkReplyBudget('private', '这是一句私聊回复').ok, true)
+  assert.equal(checkReplyBudget('local', '这是一段很长的干活说明'.repeat(10)).ok, true, '本地干活不设限')
+  ok('单轮字数预算：群 15 / 私聊 30 / 本地不设限')
 
   console.log(`\n全部通过：${pass} 项`)
 } catch (e) {

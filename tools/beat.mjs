@@ -14,13 +14,14 @@
  */
 
 import { rootDir } from '../lib/store.js'
-import { loadConfig, ensureBeatDirs, saveConfig } from '../lib/beat/config.js'
+import { loadConfig, ensureBeatDirs, saveConfig, saveFocus } from '../lib/beat/config.js'
 import { loadState, runOnce, updateState } from '../lib/beat/index.js'
 import { materialCounts, materialList } from '../lib/beat/material.js'
 import { maintain } from '../lib/beat/maintain.js'
 import { loadSessions } from '../lib/beat/session.js'
 import { burnSensitive, sensitiveFiles, vaultInfo } from '../lib/secure/vault.js'
 import { profileStatus, rebuildProfile } from '../lib/person/rebuild.js'
+import { beatMetrics } from '../lib/beat/metrics.js'
 import { setConfigRoot } from '../lib/llm.js'
 
 const root = process.env.DSH_MEMORY_HOME || rootDir()
@@ -58,6 +59,12 @@ async function main() {
     if (state.lastGateDetail && Object.keys(state.lastGateDetail).length) {
       console.log(`闸门细节：${JSON.stringify(state.lastGateDetail)}`)
     }
+    return
+  }
+
+  if (cmd === 'metrics') {
+    const m = await beatMetrics(root, { days: Number(kv('days')) || 30 })
+    console.log(JSON.stringify(m, null, 2))
     return
   }
 
@@ -128,6 +135,7 @@ async function main() {
     const v = args[1] || ''
     if (v === 'off' || v === '0') {
       await updateState(root, (st) => { st.focusUntil = '' })
+      await saveFocus(root, '').catch(() => {})
       console.log('专注模式已关。')
       return
     }
@@ -135,11 +143,12 @@ async function main() {
     if (!min) { console.log('用法：focus <1-1440 分钟> 或 focus off'); process.exitCode = 1; return }
     const focusUntil = new Date(Date.now() + min * 60000).toISOString()
     await updateState(root, (st) => { st.focusUntil = focusUntil })
+    await saveFocus(root, focusUntil).catch(() => {})
     console.log(`专注模式到 ${focusUntil}。`)
     return
   }
 
-  console.log('用法：init | status | why | materials [--all] [--source=chat] | tick [--send] | gc | profile [rebuild] | vault | burn [--yes] | focus <分钟|off>')
+  console.log('用法：init | status | why | metrics [--days=30] | materials [--all] [--source=chat] | tick [--send] | gc | profile [rebuild] | vault | burn [--yes] | focus <分钟|off>')
   process.exitCode = 1
 }
 

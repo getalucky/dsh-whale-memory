@@ -11,6 +11,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { gateMode, gateDecision } from '../lib/gate.js'
+import { moodLoad, moodCooldownMinutes, preferKnowledge, checkGate } from '../lib/beat/gate.js'
+import { parseJudge, judgePrompt } from '../lib/beat/feedback.js'
 import { registerTools } from '../lib/tools.js'
 import { createHarness } from './eval/harness.mjs'
 
@@ -30,6 +32,31 @@ assert.equal(dec.gate, 'warn')
 assert.equal(gateDecision('enforce', false).state, 'suggested')
 assert.equal(gateDecision('off', false).gate, 'off')
 ok('三态判定：只有 enforce 会拦')
+
+// 情绪只调阈值（文档 14.8）：心情低 → 冷却变长；好奇高 → 知识素材优先
+assert.equal(moodLoad(null), 0)
+assert.ok(moodLoad({ 委屈: 0.5, 烦躁: 0.5 }) > 0.4)
+assert.equal(moodCooldownMinutes(null, 30), 30)
+assert.ok(moodCooldownMinutes({ 委屈: 0.8, 生气: 0.6 }, 30) > 30)
+assert.equal(preferKnowledge({ 好奇: 0.6 }), true)
+assert.equal(preferKnowledge({ 好奇: 0.2 }), false)
+const blocked = checkGate({
+  now: new Date('2026-11-15T12:00:00'),
+  config: { cooldownMinutes: 30 },
+  state: { lastDeliveryAt: '2026-11-15T11:50:00', daily: { day: '2026-11-15', sent: 1 } },
+  counts: { active: 3 },
+  mood: { 生气: 0.9 },
+})
+assert.equal(blocked.reason, 'cooldown')
+assert.ok(blocked.detail.cooldown > 30, JSON.stringify(blocked.detail))
+ok('情绪只改开口阈值：冷却加长、好奇优先知识素材')
+
+// 第四层只收三种标签；坏 JSON 不崩，理由截断
+assert.equal(parseJudge('{"label":"engaged","confidence":0.8,"reason":"接话了"}').label, 'engaged')
+assert.equal(parseJudge('{"label":"乱写"}'), null)
+assert.equal(parseJudge('不是 JSON'), null)
+assert.ok(judgePrompt('哈哈').includes('annoyed'))
+ok('反馈第四层：窄 rubric，只认三种标签')
 
 const h = await createHarness([
   { id: 'enf', turns: ['今天挺热的'] },

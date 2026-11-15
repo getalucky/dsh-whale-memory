@@ -18,6 +18,8 @@ import { enrichItem, summarize, weightOf } from '../lib/enrich.js'
 import { extractConcepts } from '../lib/taxonomy.js'
 import { skipReason, hasSignal, extractCandidates } from '../lib/distill.js'
 import { createHarness } from './eval/harness.mjs'
+import { detectEvaluation, noteEvaluation, evalPath } from '../lib/evalnote.js'
+import { searchFunnel } from '../lib/funnel.js'
 import { planDeepen, applyDeepen } from '../lib/deepen.js'
 
 let pass = 0
@@ -176,6 +178,39 @@ try {
     assert.equal(again.id, tool.id)
     assert.equal(tool.state, 'active')
     ok('同事实合并：省略主语/日期也算同一条，模型写的没被顶掉')
+  }
+
+  // 12. 负反馈记账（文档 12.7）：只认明确评价，落 audit，不进记忆
+  {
+    assert.equal(detectEvaluation('今天天气不错'), null)
+    const good = detectEvaluation('这次对了，靠谱')
+    assert.equal(good.polarity, 'ok')
+    const bad = detectEvaluation('你怎么又错了，太啰嗦')
+    assert.equal(bad.polarity, 'fail')
+    assert.equal(bad.category, 'length')
+    const wrote = await noteEvaluation(root, { text: '你怎么又错了，太啰嗦', scope: 'private:1', at: '2026-11-15T12:00:00.000Z' })
+    assert.equal(wrote, true)
+    const rows = await readJsonl(evalPath(root))
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].kind, 'feedback')
+    assert.equal(rows[0].polarity, 'fail')
+    assert.ok(!JSON.stringify(rows[0]).includes('scopes/'), '评测账本不该写进 scopes')
+    ok('负反馈记账：只收明确评价、只落 audit')
+  }
+
+  // 13. 双时间轴：未生效/已过期不参与检索，unknown 照常可用
+  {
+    const sc = emptyScope('private', '14')
+    const future = addItem(sc, { text: '下个月才开始生效的计划', kind: 'event', validFrom: '2099-01-01' })
+    const expiredItem = addItem(sc, { text: '早就过期的旧计划', kind: 'event', validUntil: '2020-01-01' })
+    const normal = addItem(sc, { text: '没有时间窗的普通事实', kind: 'fact' })
+    const hits = searchFunnel([sc], { query: '计划', now: Date.now() })
+    assert.ok(!hits.some((x) => x.id === future.id), '未生效的条目不该被召回')
+    assert.ok(!hits.some((x) => x.id === expiredItem.id), '已过期的条目不该被召回')
+    const okHit = searchFunnel([sc], { query: '普通事实', now: Date.now() })
+    assert.equal(okHit[0]?.id, normal.id)
+    assert.equal(okHit[0]?.validity, 'unknown')
+    ok('双时间轴：not_yet / expired 不召回，unknown 正常')
   }
 
   console.log(`\n${pass} 通过 · 0 失败`)

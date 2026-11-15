@@ -6,6 +6,37 @@
 
 ## 未发布
 
+### 新增
+
+- 情绪层（文档第十四章，v0.20.0）：12 个可命名分量 + 亲近/信任/耐心三轴，
+  半衰期惰性衰减、事件驱动、独立 `affect/state.json`，不进 scopes、不参与检索与画像。
+  注入一行 `whale:affect`（order 8570），跨档 + 60 分钟冷却 + 每会话 3 次才重画。
+  面板 `GET /api/affect` 只读查看；日记末尾由代码拼一行「今日心情」。
+  `DSH_MEMORY_AFFECT=off` 或 `affect.enabled=false` 可整体关掉。
+- 蒸馏旁路：蒸馏数组末尾可多一个 `{"affect":[...]}` 元素，顺手回填情绪，不新增模型调用。
+- 情绪 CLI：`node tools/affect.mjs status | why <分量> | log [行数] | reset --yes`；
+  `status.md` 增加一行只读「当前心情」；情绪事件随维护相保留 30 天。
+- beat 读情绪（文档 14.8）：心情低时开口冷却自动加长，好奇高时素材候选优先 web；
+  只改阈值和排序，不改权限与日限。
+- 反馈第四层：前三层看不出态度的中性回复进入队列，由维护相用独立便宜模型判
+  `engaged / neutral / annoyed`，权重最多移 0.2，连续两次 annoyed 退役素材；
+  `feedback.jsonl` 只存 label / confidence / 分数，不存回复原文。
+- beat 指标：`lib/beat/metrics.js` 算采纳率、报账率、误投率、闸门拦截率、画像证据覆盖、
+  人格污染，挂 `GET /api/beat` 与 `node tools/beat.mjs metrics`。
+- `beat/interests.json` 与 `beat/focus.json` 独立落盘（文档 13.3），配置/状态里的旧字段继续兼容。
+- 身份锚点独立块（12.7）：从 `USER.md` 最稳的 3 条挑，单条 ≤160、整块 ≤640 字符，
+  与画像注入互不重复。
+- 双时间轴 validity（12.7）：`unknown / not_yet / active / expired` 四态，
+  `memory_save` 支持 `valid_from` / `valid_until`，未生效与过期条目不进检索、不注入；
+  检索与 `read_memory` 输出带 `validity_scope`。
+- `importance ≥ 0.7` 硬保护（12.7）：容量淘汰与深化归档都跳过，必须显式处理。
+- 回合内审查（12.7）：本地工程会话累计 10 个用户回合做一次「只看不写」的蒸馏，
+  产出全部进 `suggested`，不合并、不进副库。
+- 负反馈记账（12.7）：明确的好评 / 差评落 `audit/evals.jsonl`（`kind=feedback`、极性、分类、原话），
+  不进记忆、不进画像。
+- 单轮字数预算（12.7）：群聊 ≤15 字、私聊 ≤30 字写进规矩段；超限回复只记
+  `audit/length.jsonl`，不改写回复。
+
 ### 变更
 
 - `模型 → 找素材` 页去重：顶部只留引擎开关、一行说明和一行成本，删掉与页签重复的「当前：agent / 直连」徽章、
@@ -14,6 +45,8 @@
 
 ### 修复
 
+- `beat burn` 只列心理画像与心事匣两样；v3.3 已取消的 `affect-journal.enc`
+  不再出现在敏感文件清单里。
 - `tools/metrics.mjs` 的「待确认」原来报的是 30 天账本里「写入时先挂过待确认」的历史次数，看着像库里堆了一堆没人点。
   现在拆成两个口径：`pending` = 当前真挂着的待确认条数，`suggested` = 窗口内写入时先挂过待确认的次数。
 
@@ -23,6 +56,8 @@
   条目集合 / 注入渲染 / 召回 top8 顺序与重建前逐字相同、副库仍 ≤32KB；`--strict` 也计入这一项。
 - 新增 `test/extras-off.mjs`（已进 `npm test`）：附加功能全关时规矩段、人格段、记忆段照常挂载，
   复审段为空，16 个核心工具注册 0 失败。
+- 补测：情绪摘要/闸门快照/reset、beat 情绪阈值与第四层解析、身份锚点预算与去重、
+  validity 四态、importance 硬保护、回合内审查 suggested-only、负反馈账本、字数预算。
 
 ## 0.19.0 · 2026-11-14
 

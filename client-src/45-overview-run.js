@@ -16,6 +16,15 @@
         }
       }
       const 等级色 = (level) => level === 'error' ? 'wm-badgeDanger' : level === 'warn' ? 'wm-badgeWarn' : 'wm-badgeInfo'
+      // 情绪：只读展示（文档 14.9）。数值不进面板，只给最近的分量和档位。
+      const 情绪 = (态 && 态.affect) || null
+      const 档 = ['', '（轻）', '（中）', '（明显）']
+      const 情绪名 = 情绪 && 情绪.mood && 情绪.mood.length
+        ? `${情绪.mood[0].name}${档[情绪.mood[0].bucket] || ''}`
+        : '平常'
+      const 情绪说明 = 情绪
+        ? (情绪.mood || []).slice(0, 3).map((m) => `${m.name}${档[m.bucket] || ''}`).join(' · ') || '没什么起伏'
+        : '情绪层没开'
       return h('div', { className: 'wm-body' },
         h('div', { className: 'wm-grid wm-tiles' },
           WD.格('分片', String(c.scopes ?? 0), '私聊 / 群 / 本机 各自隔离'),
@@ -23,6 +32,7 @@
           WD.格('实体', 图 ? `${(图.nodes || []).length} 个` : '—', 图 ? `${(图.edges || []).length} 条关系` : '图谱还没建'),
           WD.格('人格', p.exists ? `v${p.version || 0}` : '缺 persona.md', p.exists ? `${p.tokens || 0}/${p.limit || 1200} tok · ${p.budget?.mode === 'auto' ? '自动额度' : '固定额度'}${p.overBudget ? ' · 超预算' : ''}` : '固定人格没挂上'),
           WD.格('信任', 信任.origin || '—', 信任.usable ? '读写正常' : '未信任，采集停用'),
+          WD.格('心情', 情绪名, 情绪说明),
           WD.格('版本', 版本标签, 构建 && 构建.commit
             ? `${构建.branch || '?'} · ${时间(构建.builtAt) || '构建时间未知'}${构建.dirty ? ' · 打包时有未提交改动' : ''}`
             : '库路径见下'),

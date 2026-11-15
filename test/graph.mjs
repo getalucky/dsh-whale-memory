@@ -195,7 +195,7 @@ t('保存后能读回', () => { eq(g1.nodes.length, g0.nodes.length); eq(g1.edge
 const routes = new Map()
 const fakeCtx = { webServer: { register({ path, handler }) { routes.set(path, handler); return () => routes.delete(path) } } }
 const api = registerWebApi(fakeCtx, { root, log: () => {}, version: '0.2.0' })
-t('注册了 33 条路由', () => eq(routes.size, 33))
+t('注册了 34 条路由', () => eq(routes.size, 34))
 
 let token = ''
 const call = (p, { method = 'GET', body, headers = {}, auth = true } = {}) => new Promise((resolve) => {

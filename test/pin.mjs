@@ -11,7 +11,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { ensureDirs, emptyScope, addItem, saveScope, loadScope, autoPinWhy, setPin, decayScore, appendSearchHits } from '../lib/store.js'
+import { ensureDirs, emptyScope, addItem, saveScope, loadScope, autoPinWhy, setPin, decayScore, appendSearchHits, overflowItems, IMPORTANCE_PROTECT } from '../lib/store.js'
 import { runForget } from '../lib/forget.js'
 import { searchFunnel } from '../lib/funnel.js'
 import { vaultPaths } from '../lib/vault.js'
@@ -87,6 +87,17 @@ try {
   assert.equal(hotBack.pinWhy, 'used')
   assert.equal(hotBack.searchHits, 8)
   ok('forget 批处理：search_hits 账本达标自动钉住')
+
+  // 7. importance 硬保护（文档 12.7）：≥0.7 的条目不参与容量淘汰
+  const cap = emptyScope('private', 'cap', '容量测试')
+  const oldAt = new Date(Date.now() - 400 * 86400000).toISOString()
+  const cold = addItem(cap, { text: '很冷但普通的一条', kind: 'fact', conf: 0.4 })
+  const protectedItem = addItem(cap, { text: '很冷但很重要，不能自动归档', kind: 'fact', conf: 0.4 })
+  for (const x of [cold, protectedItem]) { x.created = oldAt; x.lastHit = oldAt; x.weight = 0.1 }
+  protectedItem.importance = IMPORTANCE_PROTECT
+  const drop = overflowItems(cap, 1)
+  assert.deepEqual(drop.map((x) => x.id), [cold.id], JSON.stringify(drop.map((x) => x.id)))
+  ok('importance ≥ 0.7 不进容量淘汰')
 
   console.log(`\n${pass} 通过 · 0 失败`)
 } finally {
