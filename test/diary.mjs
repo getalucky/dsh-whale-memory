@@ -13,7 +13,7 @@ import { ensureDirs, loadScope, saveScope, addItem } from '../lib/store.js'
 import { dayKey } from '../lib/beat/schedule.js'
 import {
   collectDay, writeDiary, readDiary, listDiaries, addDays, normalizeDay, titleOf, diaryFile, diaryDir,
-  weekRange, weekKeyOf, buildRollup, readRollup, listRollups, dueRollups,
+  weekRange, weekKeyOf, buildRollup, readRollup, listRollups, dueRollups, diaryWorthy, buildPrompt,
 } from '../lib/diary.js'
 
 const root = await mkdtemp(join(tmpdir(), 'whale-diary-'))
@@ -75,6 +75,17 @@ try {
   assert.equal(normalizeDay('2026-11-06'), '2026-11-06')
   assert.equal(titleOf('2026-11-06'), '2026-11-06 · 星期五')
   ok('日期校验和星期标题')
+
+  // 日记只收生活/关系：工程事实、公共池、半句计划不进素材
+  assert.equal(diaryWorthy({ kind: 'fact', text: '在 D:\\DSH 下跑 npm test 和 deploy' }, 'local'), false)
+  assert.equal(diaryWorthy({ kind: 'fact', text: '爹今天笑得很开心' }, 'private'), true)
+  assert.equal(diaryWorthy({ kind: 'relation', text: '爹很在意我及时回消息' }, 'private'), true)
+  assert.equal(diaryWorthy({ kind: 'pref', text: '爹喜欢清爽的水彩画风' }, 'public'), false)
+  assert.equal(diaryWorthy({ kind: 'event', text: '以后会不会越来越多' }, 'private'), false)
+  const prompt = buildPrompt(today, [{ label: '私聊', items: [{ at: '10:00', text: '爹今天笑了', kind: 'pref' }] }])
+  assert.ok(prompt[0].content.includes('不是工作总结'), 'prompt 要明确是生活日记')
+  assert.ok(prompt[0].content.includes('最多一句带过'), '技术内容要压到一句')
+  ok('生活过滤：技术/公共池/碎片不进日记，prompt 不是工作总结')
 
   // ---- 第一次写 ----
   let calls = 0
