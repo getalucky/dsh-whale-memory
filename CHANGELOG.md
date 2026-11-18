@@ -8,6 +8,13 @@
 
 ### 新增
 
+- 酒馆预设会话不记忆：会话当前 `agentPreset` 属于酒馆预设（`.agent-presets/presets.json`
+  登记、目录带「酒馆管理面板生成」标记，或目录名/注册名含酒馆、角色扮演、roleplay、
+  tavern）时，用户/助手消息在采集层整条跳过——不进 staging、不算情绪、不喂 beat、
+  不涨回合计数。判定跟随投影服务与 `agent-preset/selected`，切回标准预设立即恢复；
+  不以 `session-bindings.json` 为判据。换酒馆插件时，预设 id 认不出来可加进
+  `settings.json` 的 `roleplay_presets` 数组或环境变量 `DSH_MEMORY_ROLEPLAY_PRESETS`
+  （逗号分隔）。测试：`node test/roleplay.mjs`。
 - 情绪层（文档第十四章，v0.20.0）：12 个可命名分量 + 亲近/信任/耐心三轴，
   半衰期惰性衰减、事件驱动、独立 `affect/state.json`，不进 scopes、不参与检索与画像。
   注入一行 `whale:affect`（order 8570），跨档 + 60 分钟冷却 + 每会话 3 次才重画。
