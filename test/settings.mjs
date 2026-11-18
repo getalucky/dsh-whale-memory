@@ -447,6 +447,7 @@ try {
       interests: '城市生活、独立游戏',
       maxWanderPerDay: '3',
       refillWebBelow: '3',
+      idleMinutes: '45',
     },
   })
   assert.equal(beatSaved.statusCode, 200)
@@ -457,6 +458,7 @@ try {
   assert.deepEqual(beatSaved.body.config.interests, ['城市生活', '独立游戏'])
   assert.equal(beatSaved.body.config.maxWanderPerDay, 3)
   assert.equal(beatSaved.body.config.refillBelowBySource.web, 3)
+  assert.equal(beatSaved.body.config.idleMinutes, 45)
 
   const badWindow = await 调('/beat/config', { method: 'POST', body: { windows: '11点-15点' } })
   assert.equal(badWindow.statusCode, 400)

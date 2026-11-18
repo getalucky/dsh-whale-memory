@@ -5,13 +5,13 @@
  */
 
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeFile, mkdir } from 'node:fs/promises'
 
 import {
-  DEFAULT_CONFIG, deliveriesPath, ensureBeatDirs, loadConfig, saveConfig, topicPath,
+  DEFAULT_CONFIG, configPath, deliveriesPath, ensureBeatDirs, idleMinutesOf, loadConfig, saveConfig, topicPath,
 } from '../lib/beat/config.js'
 import { dayKey, inWindow, jitter, nextWindowStart, toMinutes, wanderDue } from '../lib/beat/schedule.js'
 import { checkGate } from '../lib/beat/gate.js'
@@ -30,6 +30,7 @@ import { loadState, saveState } from '../lib/beat/state.js'
 import { applyReport, noteDelivery, noteUserMessage, settleUnreported } from '../lib/beat/feedback.js'
 import { schedulerState } from '../lib/beat/scheduler.js'
 import { loadSessions, rotateBeatSession, saveSessions } from '../lib/beat/session.js'
+import { senseEnv } from '../lib/beat/env.js'
 import {
   burnSensitive, checkSensitiveHealth, decryptText, encryptText, keyPath, notepadPath, readEncrypted, writeEncrypted,
 } from '../lib/secure/vault.js'
@@ -84,15 +85,14 @@ async function main() {
   // 来源见底只放行话题类闸门；忙、静默这些照旧拦。
   assert.equal(gateAllowsWander({ ok: false, reason: 'off-topic' }), false)
   assert.equal(gateAllowsWander({ ok: false, reason: 'off-topic' }, { sourceLow: true }), true)
-  assert.equal(gateAllowsWander({ ok: false, reason: 'busy' }, { sourceLow: true }), false)
+  assert.equal(gateAllowsWander({ ok: false, reason: 'away' }, { sourceLow: true }), false)
 
   // 3. 闸门
   const base = { ...DEFAULT_CONFIG, quietHours: { start: '01:00', end: '08:00' } }
   const state = { daily: { day: dayKey(at(12)), sent: 0 }, recentMaterialIds: [] }
   assert.equal(checkGate({ now: at(2), config: base, state, counts: { active: 3 } }).reason, 'quiet_hours')
   assert.equal(checkGate({ now: at(12), config: base, state: { ...state, focusUntil: at(13).toISOString() }, counts: { active: 3 } }).reason, 'focus_mode')
-  assert.equal(checkGate({ now: at(12), config: base, state, counts: { active: 3 }, env: { idleMinutes: 31 } }).reason, 'token_saver')
-  assert.equal(checkGate({ now: at(12), config: base, state, counts: { active: 3 }, env: { busy: true } }).reason, 'busy')
+  assert.equal(checkGate({ now: at(12), config: base, state, counts: { active: 3 }, env: { idleMinutes: 31 } }).reason, 'away')
   assert.equal(checkGate({ now: at(12), config: base, state: { ...state, daily: { day: dayKey(at(12)), sent: 10 } }, counts: { active: 3 } }).reason, 'daily_cap')
   assert.equal(checkGate({ now: at(12), config: base, state: { ...state, lastDeliveryAt: at(11, 45).toISOString() }, counts: { active: 3 } }).reason, 'cooldown')
   assert.equal(checkGate({ now: at(12), config: base, state, counts: { active: 0 } }).reason, 'no_material')
@@ -102,6 +102,127 @@ async function main() {
   }).reason, 'duplicate')
   assert.equal(checkGate({ now: at(12), config: base, state, counts: { active: 3 }, candidates: ['m1'] }).ok, true)
 
+  // 绑定会话刚聊过：不投；安静够久才放行。读不到全局会话不能拿聊天间隔冒充。
+  const chatCfg = { ...base, targetSessionId: 'session-x', idleMinutes: 30 }
+  assert.equal(checkGate({
+    now: at(12), config: chatCfg, counts: { active: 3 },
+    state: { ...state, lastUserAtBySession: { 'session-x': at(11, 50).toISOString() } },
+  }).reason, 'chatting')
+  assert.equal(checkGate({
+    now: at(12), config: chatCfg, counts: { active: 3 },
+    state: { ...state, lastUserAtBySession: { x: at(11, 20).toISOString() } },
+  }).ok, true)
+  assert.equal(checkGate({
+    now: at(12), config: chatCfg, counts: { active: 3 }, state,
+    chat: { lastUserAt: at(11, 45).toISOString() },
+  }).reason, 'chatting')
+  assert.equal(checkGate({
+    now: at(12), config: chatCfg, counts: { active: 3 }, state,
+    chat: { lastChatAt: at(11).toISOString() },
+  }).ok, true)
+  // 读不到全局会话时，别的时间不能冒充「离开」
+  assert.equal(checkGate({
+    now: at(12), config: chatCfg, counts: { active: 3 }, state,
+    chat: { lastChatAt: at(11).toISOString() },
+    env: { idleMinutes: 60, source: 'unknown', presenceKnown: false },
+  }).ok, true)
+
+  // 3.1 在场只看全局会话：不读键鼠。任一会话近期有活动就在场；都没动静才算离开。
+  {
+    const eRoot = await mkdtemp(join(tmpdir(), 'whale-env-'))
+    const oldHome = process.env.DSH_HOME
+    process.env.DSH_HOME = join(eRoot, 'home')
+    try {
+      const envCfg = { idleMinutes: 30 }
+      const unknown = await senseEnv({ root: eRoot, config: envCfg, now: at(12) })
+      assert.equal(unknown.presenceKnown, false)
+      assert.equal(unknown.away, false)
+
+      const list = [{ sessionId: 'session-a', updatedAt: at(11, 55).toISOString() }]
+      const host = { get: (name) => (name === 'sessions' ? { list: () => list } : null) }
+      const recent = await senseEnv({ ctx: host, root: eRoot, config: envCfg, now: at(12) })
+      assert.equal(recent.source, 'sessions')
+      assert.equal(recent.presenceKnown, true)
+      assert.equal(recent.away, false)
+
+      list[0].updatedAt = at(11).toISOString()
+      const away = await senseEnv({ ctx: host, root: eRoot, config: envCfg, now: at(12) })
+      assert.equal(away.away, true)
+      assert.equal(away.idleMinutes, 60)
+      const noAway = await senseEnv({
+        ctx: host, root: eRoot, config: { ...envCfg, idleMinutes: 0 }, now: at(12),
+      })
+      assert.equal(noAway.away, false, '0 表示不按离开拦')
+
+      // 专用闲逛会话自己的活动不算「用户在场」
+      await saveSessions(eRoot, {
+        sessionId: 'session-beat', createdAt: at(9).toISOString(), lastUsedAt: at(11, 59).toISOString(), rotates: 0,
+      })
+      const beatOnly = {
+        get: (name) => (name === 'sessions'
+          ? { list: () => [{ sessionId: 'session-beat', updatedAt: at(11, 59).toISOString() }] }
+          : null),
+      }
+      const ex = await senseEnv({ ctx: beatOnly, root: eRoot, config: envCfg, now: at(12) })
+      assert.equal(ex.presenceKnown, true)
+      assert.equal(ex.away, true)
+
+      // 宿主没有 sessions 服务时，退回会话缓存文件的落盘时间；专用会话文件要排除
+      const cacheDir = join(eRoot, 'home', 'storages', 'session_projcache', 'sessions')
+      await mkdir(cacheDir, { recursive: true })
+      const userFile = join(cacheDir, 'session-user.json')
+      const beatFile = join(cacheDir, 'session-beat.json')
+      await writeFile(userFile, '{}')
+      await writeFile(beatFile, '{}')
+      await utimes(userFile, at(11), at(11))
+      await utimes(beatFile, at(11, 59), at(11, 59))
+      const cacheAway = await senseEnv({ ctx: { get: () => null }, root: eRoot, config: envCfg, now: at(12) })
+      assert.equal(cacheAway.source, 'session-cache')
+      assert.equal(cacheAway.away, true)
+
+      await utimes(userFile, at(11, 55), at(11, 55))
+      const cacheRecent = await senseEnv({ ctx: { get: () => null }, root: eRoot, config: envCfg, now: at(12) })
+      assert.equal(cacheRecent.away, false)
+
+      // 投递会把目标会话写热：这些宿主/缓存时间不能把「离开」顶回去
+      await rm(cacheDir, { recursive: true, force: true })
+      await mkdir(cacheDir, { recursive: true })
+      const targetFile = join(cacheDir, 'session-target.json')
+      await writeFile(targetFile, '{}')
+      await utimes(targetFile, at(11, 59), at(11, 59))
+      const targetCfg = { targetSessionId: 'session-target', idleMinutes: 30 }
+      const targetHost = (extra = []) => ({
+        get: (name) => (name === 'sessions'
+          ? { list: () => [{ sessionId: 'session-target', updatedAt: at(11, 59).toISOString() }, ...extra] }
+          : null),
+      })
+      const targetNoise = await senseEnv({
+        ctx: targetHost(), root: eRoot, config: targetCfg,
+        state: { lastUserAt: at(10, 30).toISOString() }, now: at(12),
+      })
+      assert.equal(targetNoise.source, 'user-messages')
+      assert.equal(targetNoise.away, true, '目标会话被投递写热也不能算用户在场')
+
+      const otherActive = await senseEnv({
+        ctx: targetHost([{ sessionId: 'session-other', updatedAt: at(11, 55).toISOString() }]),
+        root: eRoot, config: targetCfg, state: { lastUserAt: at(10, 30).toISOString() }, now: at(12),
+      })
+      assert.equal(otherActive.source, 'sessions')
+      assert.equal(otherActive.away, false, '别的会话在跑就算在场')
+
+      const targetUserRecent = await senseEnv({
+        ctx: targetHost(), root: eRoot, config: targetCfg,
+        state: { lastUserAt: at(11, 55).toISOString() }, now: at(12),
+      })
+      assert.equal(targetUserRecent.away, false, '目标会话里的真实用户消息仍算在场')
+      assert.equal(targetUserRecent.source, 'user-messages')
+    } finally {
+      if (oldHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = oldHome
+      await rm(eRoot, { recursive: true, force: true })
+    }
+  }
+
   // 4. 配置热加载
   const root = await mkdtemp(join(tmpdir(), 'whale-beat-'))
   try {
@@ -110,6 +231,21 @@ async function main() {
     const d = await loadConfig(root)
     assert.equal(d.enabled, false)
     assert.equal(d.engine, 'agent')
+    assert.equal(d.idleMinutes, 30)
+
+    // 旧的两个闲置键合成一个 idleMinutes；保存时顺手清掉旧键
+    assert.equal(idleMinutesOf({ chatIdleMinutes: 45, tokenSaverIdleMinutes: 60 }), 45)
+    await writeFile(configPath(root), JSON.stringify({
+      chatIdleMinutes: 45, tokenSaverIdleMinutes: 60, busyMinutes: 9,
+    }), 'utf8')
+    const legacy = await loadConfig(root, { reload: true })
+    assert.equal(legacy.idleMinutes, 45)
+    const migrated = await saveConfig(root, {})
+    assert.equal(migrated.idleMinutes, 45)
+    const rawCfg = JSON.parse(await readFile(configPath(root), 'utf8'))
+    assert.equal(rawCfg.idleMinutes, 45)
+    assert.ok(!('chatIdleMinutes' in rawCfg) && !('tokenSaverIdleMinutes' in rawCfg) && !('busyMinutes' in rawCfg))
+
     const saved = await saveConfig(root, { enabled: true, dryRun: false })
     assert.equal(saved.enabled, true)
     assert.equal(saved.dryRun, false)
@@ -237,7 +373,9 @@ async function main() {
         pub.items[0].weight = 0.6
         pub.items[0].observedAt = at(12).toISOString()
         await saveScope(runRoot, pub)
-        await saveConfig(runRoot, { enabled: true, dryRun: false })
+        await saveConfig(runRoot, {
+          enabled: true, dryRun: false, idleMinutes: 0,
+        })
         const cfg2 = await loadConfig(runRoot, { reload: true })
         const r = await runOnce({ root: runRoot, config: cfg2, now: at(12) })
         assert.equal(r.gate.ok, true)
@@ -274,7 +412,7 @@ async function main() {
         await ensureDirs(qRoot)
         await ensureBeatDirs(qRoot)
         const qCfg = await saveConfig(qRoot, {
-          enabled: true, dryRun: true, busyMinutes: 0, tokenSaverIdleMinutes: 100000,
+          enabled: true, dryRun: true, idleMinutes: 0,
           quietHours: { start: '11:00', end: '13:00' }, interests: ['城市'],
         })
         let calls = 0
@@ -296,7 +434,7 @@ async function main() {
         await ensureDirs(dRoot)
         await ensureBeatDirs(dRoot)
         const dCfg = await saveConfig(dRoot, {
-          enabled: true, dryRun: true, busyMinutes: 0, tokenSaverIdleMinutes: 100000,
+          enabled: true, dryRun: true, idleMinutes: 0,
           quietHours: { start: '01:00', end: '08:00' }, interests: ['城市'],
         })
         let calls = 0
@@ -365,7 +503,7 @@ async function main() {
         await mkdir(join(vRoot, 'person'), { recursive: true })
         await writeFile(join(vRoot, 'person', 'psych.json'), Buffer.from('这不是 WHLV1 密文'), 'utf8')
         const vCfg = await saveConfig(vRoot, {
-          enabled: true, dryRun: true, busyMinutes: 0, tokenSaverIdleMinutes: 100000,
+          enabled: true, dryRun: true, idleMinutes: 0,
           quietHours: { start: '01:00', end: '08:00' }, interests: ['城市'],
         })
         let calls = 0
@@ -549,7 +687,7 @@ async function main() {
           enabled: true, dryRun: false, refillBelow: 1, minIntervalHours: 4,
           quietHours: { start: '01:00', end: '08:00' },
           windows: [{ start: '11:00', end: '15:00' }],
-          targetSessionId: 'session-busy',
+          targetSessionId: 'session-busy', idleMinutes: 0,
         })
         await saveState(bRoot, { lastWanderAt: at(12).toISOString() })
         // 绑了目标之后投递前要先对话题：没有 staging 会卡在 no-topic，走不到写句柄冲突
@@ -586,8 +724,7 @@ async function main() {
           enabled: true, dryRun: true, refillBelow: 1, minIntervalHours: 999,
           quietHours: { start: '01:00', end: '08:00' },
           windows: [{ start: '11:00', end: '15:00' }],
-          targetSessionId: 'session-topic',
-          busyMinutes: 0, tokenSaverIdleMinutes: 100000,
+          targetSessionId: 'session-topic', idleMinutes: 0,
         })
         await addMaterial(tRoot, {
           text: '部署脚本是在 DSH 关闭时运行的', source: 'web',
