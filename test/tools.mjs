@@ -81,18 +81,28 @@ try {
   assert.ok(cut.tokens <= 200, `${cut.tokens}`)
   ok('read_memory：单次 token 上限生效')
 
-  // 重复读：同一条同 section 返回缓存提示，不重复展开正文
-  const again = await tools.get('read_memory').execute({ id: hit.id })
+  // 重复读：第二次回缓存提示（省 token），第三次直接给正文，第四次硬拒。
+  // 老版本缓存命中原路返回、不计次数，模型能对着同一条无限重读（2026-11-19 读了 169 次）。
+  const other = live.find((x) => x.id !== hit.id).id
+  const r2 = await tools.get('read_memory').execute({ id: other })
+  assert.ok(r2.ok && r2.cached !== true && r2.text.length > 0, JSON.stringify(r2))
+
+  const again = await tools.get('read_memory').execute({ id: other })
   assert.equal(again.ok, true)
   assert.equal(again.cached, true)
   assert.ok(/刚读过/.test(again.text), again.text)
-  ok('read_memory：同一条重复读返回缓存提示')
+  ok('read_memory：第二次重读回缓存提示')
 
-  // 不同 section 累计 3 次后拒绝（60 秒窗口近似）
-  const blocked = await tools.get('read_memory').execute({ id: hit.id, section: '场景' })
+  const third = await tools.get('read_memory').execute({ id: other })
+  assert.equal(third.ok, true, JSON.stringify(third))
+  assert.ok(third.cached !== true && third.text.length > 0, JSON.stringify(third))
+  ok('read_memory：第三次重读直接给正文，不再只回提示')
+
+  // 第 4 次拒绝：1 分钟窗口按条累计，缓存命中也要算
+  const blocked = await tools.get('read_memory').execute({ id: other })
   assert.equal(blocked.ok, false)
   assert.ok(/3 次/.test(blocked.why), blocked.why)
-  ok('read_memory：同一条 1 分钟 3 次上限')
+  ok('read_memory：同一条 1 分钟最多给 3 次')
 
   // usage 记录
   const p = vaultPaths(h.root, sc.kind, sc.id)
